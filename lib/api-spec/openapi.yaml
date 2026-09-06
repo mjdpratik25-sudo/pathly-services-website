@@ -1,0 +1,87 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: order-items
+    description: Nearby order-item categories and local sources
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /order-items/categories:
+    get:
+      operationId: listOrderItemCategories
+      tags: [order-items]
+      summary: List nearby order-item categories
+      description: Returns curated Agartala sources for groceries, pharmacy, household supplies, local shops, and nearby services.
+      responses:
+        "200":
+          description: Order-item categories and local sources
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrderItemCategory"
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    OrderItemSource:
+      type: object
+      properties:
+        name:
+          type: string
+        areaOrAddress:
+          type: string
+        contactOrLink:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+      required:
+        - name
+        - areaOrAddress
+        - contactOrLink
+        - notes
+    OrderItemCategory:
+      type: object
+      properties:
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrderItemSource"
+      required:
+        - slug
+        - name
+        - description
+        - sources
+
