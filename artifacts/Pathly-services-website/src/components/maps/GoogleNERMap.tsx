@@ -73,7 +73,7 @@ interface GoogleNERMapProps {
   isSidebarOpen?: boolean;
 }
 
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCDnSPTtAYelKvsL1b-hm3PAiGITgNTJtY';
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 
 const POPULAR_HUBS = [
   { name: 'Guwahati Hub', lat: 26.1445, lng: 91.7362, state: 'Assam' },

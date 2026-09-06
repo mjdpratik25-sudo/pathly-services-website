@@ -5,7 +5,7 @@
 import { INITIAL_WEATHER, type WeatherData } from '../data/nerData';
 
 const STORAGE_KEY = 'pathly_openweathermap_key';
-export const DEFAULT_OPENWEATHER_KEY = '2352991569540ce7175ec3304f1ca5d1';
+export const DEFAULT_OPENWEATHER_KEY = '';
 const DEFAULT_FALLBACK_KEY = import.meta.env.VITE_OPENWEATHERMAP_API_KEY || DEFAULT_OPENWEATHER_KEY;
 
 export function getOpenWeatherMapKey(): string {

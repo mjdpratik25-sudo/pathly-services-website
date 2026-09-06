@@ -10,8 +10,8 @@ const TWILIO_AUTH_STORAGE = 'pathly_twilio_token';
 const TWILIO_PHONE_STORAGE = 'pathly_twilio_phone';
 const PROVIDER_STORAGE = 'pathly_sms_provider';
 
-// Default Verified Key
-export const DEFAULT_FAST2SMS_KEY = 'HC1zAD7jcFKQkIUopTJyNBiqvbOtMERmn04xalP8wLhuXWe6s9qLOc29TavDPIUFMhG8soVZzxK7Q6Jn';
+// Key resolved from: localStorage → VITE_FAST2SMS_API_KEY env var → empty
+export const DEFAULT_FAST2SMS_KEY = '';
 
 export function getSmsProvider(): SmsProvider {
   return (localStorage.getItem(PROVIDER_STORAGE) as SmsProvider) || 'fast2sms';

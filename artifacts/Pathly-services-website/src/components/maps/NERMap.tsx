@@ -1,7 +1,7 @@
 // ============================================================
 // NERMap: Tactical GIS Command & Topographic Intelligence Platform
 // Powered by Google Maps Platform (Smooth Terrain & Multispectral Hybrid Engine)
-// Key: AIzaSyCDnSPTtAYelKvsL1b-hm3PAiGITgNTJtY
+// Key: loaded from VITE_GOOGLE_MAPS_API_KEY env var
 // ============================================================
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -43,7 +43,7 @@ import { geocodeAddress, reverseGeocode, searchSuggestions, type GeocodingResult
 import { sendFast2SmsOtp } from '../../lib/smsService';
 import { lockScroll, unlockScroll } from '../../lib/scrollLock';
 
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyCDnSPTtAYelKvsL1b-hm3PAiGITgNTJtY';
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 
 const POPULAR_HUBS = [
   { name: 'Guwahati Hub', lat: 26.1445, lng: 91.7362, state: 'Assam' },

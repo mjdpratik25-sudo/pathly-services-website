@@ -114,7 +114,7 @@ pnpm install
 
 # Configure environment variables
 cp artifacts/Pathly-services-website/.env.example artifacts/Pathly-services-website/.env.local
-# Edit .env.local and add your Google Maps API key
+# Edit .env.local and add your API keys (Google Maps, OpenWeatherMap, Fast2SMS)
 
 # Start local development server
 pnpm --filter @workspace/pathly-services dev
@@ -142,6 +142,10 @@ API routes are handled via Vercel Serverless Functions under the `/api` path wit
 |----------|------------|
 | `VITE_GOOGLE_MAPS_API_KEY` | Google Maps JavaScript API key (frontend) |
 | `GOOGLE_MAPS_API_KEY` | Google Maps API key (server-side) |
+| `VITE_OPENWEATHERMAP_API_KEY` | OpenWeatherMap API key — free tier: 1,000 calls/day |
+| `VITE_FAST2SMS_API_KEY` | Fast2SMS API key for emergency SMS broadcasts |
+
+> **Note:** All keys should be placed in `.env.local` (gitignored). See `.env.example` for setup instructions.
 
 ---
 
