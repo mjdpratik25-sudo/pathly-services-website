@@ -60,7 +60,7 @@ pathly-services-website/
 │   └── Pathly-services-website/  # Main frontend application
 │       ├── src/
 │       │   ├── components/       # Reusable UI components
-│       │   │   ├── auth/         # Officer authentication (OTP modal)
+│       │   │   ├── auth/         # Officer authentication (OTP model)
 │       │   │   ├── brand/        # Pathly logo & branding
 │       │   │   ├── dashboard/    # Dashboard widgets & cards
 │       │   │   ├── layout/       # Sidebar, Header, Drawers
