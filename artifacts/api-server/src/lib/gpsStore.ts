@@ -234,6 +234,31 @@ export function seedIfEmpty(): void {
     );
     for (const g of GEOFENCE_SEED) ins.run({ ...g, allowed_stop: g.allowed_stop ? 1 : 0 });
   }
+  const aCount = (db.prepare('SELECT COUNT(*) c FROM alerts').get() as { c: number }).c;
+  if (aCount === 0) {
+    const insAlert = db.prepare(
+      `INSERT INTO alerts (id, vehicle_id, category, severity, title, description, lat, lng, created_at, is_active)
+       VALUES (:id, :vehicle_id, :category, :severity, :title, :description, :lat, :lng, :created_at, :is_active)`
+    );
+    const now = Date.now();
+    const ACTIVE_ALERT_SEEDS = [
+      { id: 5, vehicle_id: 'NER-V008', category: 'unauthorized_stop', severity: 'warning', title: 'Unauthorized stop detected', description: 'AR-01-J-0123 stopped for 1 min outside a designated area', lat: 27.0869, lng: 93.6053, created_at: now - 3600000, is_active: 1 },
+      { id: 9, vehicle_id: 'NER-V001', category: 'geofence', severity: 'info', title: 'Vehicle left zone', description: 'AS-01-AB-1234 exited Guwahati Logistics Hub (warehouse)', lat: 23.2472, lng: 91.4486, created_at: now - 3500000, is_active: 1 },
+      { id: 19, vehicle_id: 'NER-V004', category: 'geofence', severity: 'info', title: 'Vehicle left zone', description: 'MN-01-E-3456 exited Dimapur Intermodal Terminal', lat: 25.9536, lng: 93.7446, created_at: now - 3400000, is_active: 1 },
+      { id: 28, vehicle_id: 'NER-V010', category: 'geofence', severity: 'info', title: 'Vehicle left zone', description: 'AS-01-L-8901 exited Guwahati Logistics Hub (warehouse)', lat: 26.2043, lng: 91.7810, created_at: now - 3300000, is_active: 1 },
+      { id: 31, vehicle_id: 'NER-V002', category: 'unauthorized_stop', severity: 'warning', title: 'Unauthorized stop detected', description: 'ML-05-C-5678 stopped for 1 min outside a designated area', lat: 25.6753, lng: 91.8923, created_at: now - 3200000, is_active: 1 },
+      { id: 38, vehicle_id: 'NER-V004', category: 'unauthorized_stop', severity: 'warning', title: 'Unauthorized stop detected', description: 'MN-01-E-3456 stopped for 1 min outside a designated area', lat: 26.0156, lng: 93.7781, created_at: now - 3100000, is_active: 1 },
+      { id: 40, vehicle_id: 'NER-V009', category: 'unauthorized_stop', severity: 'warning', title: 'Unauthorized stop detected', description: 'SK-01-K-4567 stopped for 1 min outside a designated area', lat: 27.4507, lng: 88.6466, created_at: now - 3000000, is_active: 1 },
+      { id: 42, vehicle_id: 'NER-V005', category: 'unauthorized_stop', severity: 'warning', title: 'Unauthorized stop detected', description: 'AS-06-F-7890 stopped for 1 min outside a designated area', lat: 26.8757, lng: 93.6897, created_at: now - 2900000, is_active: 1 },
+      { id: 46, vehicle_id: 'NER-V007', category: 'unauthorized_stop', severity: 'warning', title: 'Unauthorized stop detected', description: 'NL-07-H-6789 stopped for 1 min outside a designated area', lat: 25.8199, lng: 93.9670, created_at: now - 2800000, is_active: 1 },
+      { id: 48, vehicle_id: 'NER-V003', category: 'unauthorized_stop', severity: 'warning', title: 'Unauthorized stop detected', description: 'TR-01-D-9012 stopped for 1 min outside a designated area', lat: 23.9691, lng: 91.2537, created_at: now - 2700000, is_active: 1 },
+      { id: 53, vehicle_id: 'NER-V006', category: 'unauthorized_stop', severity: 'warning', title: 'Unauthorized stop detected', description: 'MZ-01-G-2345 stopped for 1 min outside a designated area', lat: 23.7379, lng: 92.4841, created_at: now - 2600000, is_active: 1 },
+      { id: 58, vehicle_id: 'NER-V002', category: 'unauthorized_stop', severity: 'warning', title: 'Unauthorized stop detected', description: 'ML-05-C-5678 stopped for 2 min outside a designated area', lat: 25.7488, lng: 91.8738, created_at: now - 2500000, is_active: 1 },
+      { id: 65, vehicle_id: 'NER-V007', category: 'unauthorized_stop', severity: 'warning', title: 'Unauthorized stop detected', description: 'NL-07-H-6789 stopped for 1 min outside a designated area', lat: 25.8799, lng: 93.8079, created_at: now - 2400000, is_active: 1 },
+      { id: 74, vehicle_id: 'NER-V004', category: 'unauthorized_stop', severity: 'warning', title: 'Unauthorized stop detected', description: 'MN-01-E-3456 stopped for 1 min outside a designated area', lat: 26.2328, lng: 93.7278, created_at: now - 2300000, is_active: 1 },
+    ];
+    for (const a of ACTIVE_ALERT_SEEDS) insAlert.run(a as unknown as Record<string, SQLInputValue>);
+  }
 }
 
 // ---- low-level helpers --------------------------------------------------
