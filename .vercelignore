@@ -1,0 +1,4 @@
+.git
+.local
+node_modules
+artifacts/api-server/data/simulator.pid
