@@ -47,6 +47,7 @@ import { lockScroll, unlockScroll } from '../../lib/scrollLock';
 import { geocodeAddress, reverseGeocode, searchSuggestions, type GeocodingResult } from '../../lib/geocodeService';
 import { Activity, Gauge, Send } from 'lucide-react';
 import { sendFast2SmsOtp } from '../../lib/smsService';
+import { getGoogleMapsKey } from '../../lib/googleMapsConfig';
 
 export interface ExactLocationResult {
   name: string;
@@ -77,8 +78,6 @@ interface GoogleNERMapProps {
   stateFilter?: NERState | 'ALL';
   isSidebarOpen?: boolean;
 }
-
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 
 const POPULAR_HUBS = [
   { name: 'Guwahati Hub', lat: 26.1445, lng: 91.7362, state: 'Assam' },
@@ -221,6 +220,12 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
 
     const loadGoogleScript = async () => {
       try {
+        const activeKey = getGoogleMapsKey();
+        if (!activeKey) {
+          if (isMounted) setLoadFailed(true);
+          return;
+        }
+
         if ((window as any).google?.maps) {
           if (isMounted) initMap((window as any).google);
           return;
@@ -229,7 +234,7 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
         const scriptId = 'google-maps-script-tag';
         let script = document.getElementById(scriptId) as HTMLScriptElement;
 
-        if (script && !script.src.includes(GOOGLE_MAPS_API_KEY)) {
+        if (script && !script.src.includes(encodeURIComponent(activeKey))) {
           script.remove();
           script = null as any;
           delete (window as any).google;
@@ -238,7 +243,7 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
         if (!script) {
           script = document.createElement('script');
           script.id = scriptId;
-          script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=geometry`;
+          script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(activeKey)}&libraries=geometry`;
           script.async = true;
           script.defer = true;
           document.head.appendChild(script);
@@ -260,51 +265,92 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
 
     loadGoogleScript();
 
-    // Catch Google Maps API auth failure (e.g. invalid key, referrer restriction, quota)
+    // Catch Google Maps API auth failure (e.g. invalid key, referrer restriction, billing disabled)
     (window as any).gm_authFailure = () => {
       console.warn('Google Maps API authentication failed (gm_authFailure). Falling back to Tactical GIS map.');
       if (isMounted) {
-        googleMapInstance.current = null;
+        try {
+          googleMapInstance.current = null;
+        } catch {}
         setLoadFailed(true);
       }
     };
 
-    // Fallback trigger: if Google Maps hasn't initialized within 12s (forgiving for slow networks),
-    // switch to visible Leaflet NERMap. This timer is cleared in initMap once Google loads.
+    // Fast fallback trigger: if Google Maps hasn't initialized within 3.5s,
+    // seamlessly switch to Tactical GIS map.
     const fallbackTimeout = window.setTimeout(() => {
       if (isMounted && !googleMapInstance.current) {
-        console.warn('Google Maps did not initialize within 12s. Falling back to Tactical GIS map.');
+        console.warn('Google Maps did not initialize within 3.5s. Falling back to Tactical GIS map.');
         setLoadFailed(true);
       }
-    }, 12000);
+    }, 3500);
     fallbackTimeoutRef.current = fallbackTimeout;
 
-    // Fallback trigger: watch for Google's injected "didn't load Google Maps correctly" error banner.
-    // We ONLY react to the definitive error container class that Google adds on a real render/auth failure,
-    // and never to arbitrary page text (which caused false positives / transient falls backs).
+    // Fallback trigger: watch for Google's injected error overlay or billing warning.
+    // Triggers instantly whenever Google watermarks or disables the map.
     let failObserver: MutationObserver | null = null;
     const observerTarget = mapRef.current;
     if (observerTarget) {
       failObserver = new MutationObserver(() => {
-        if (!isMounted || googleMapInstance.current) return;
-        const hasErrContainer = observerTarget.querySelector('.gm-err-container, .gm-err-message');
+        if (!isMounted) return;
+        const hasErrContainer = observerTarget.querySelector('.gm-err-container, .gm-err-message, .gm-style-pbc');
         const text = observerTarget.textContent || '';
-        const authErrored = /didn'?t load Google Maps correctly/i.test(text) || /This page can'?t load Google Maps correctly/i.test(text);
-        if (hasErrContainer && authErrored) {
-          console.warn('Google Maps render error detected. Falling back to Tactical GIS map.');
+        const authErrored =
+          /didn'?t load Google Maps correctly/i.test(text) ||
+          /This page can'?t load Google Maps correctly/i.test(text) ||
+          /Do you own this website/i.test(text);
+        if (hasErrContainer || authErrored) {
+          console.warn('Google Maps billing / auth error detected. Falling back to Tactical GIS map.');
+          try {
+            googleMapInstance.current = null;
+          } catch {}
           setLoadFailed(true);
         }
       });
       failObserver.observe(observerTarget, { childList: true, subtree: true, characterData: true });
     }
 
+    // Key change listener to re-init dynamically
+    const handleKeyChange = () => {
+      // Clear the old fallback timer so it doesn't fire for the new key attempt
+      if (fallbackTimeoutRef.current) {
+        window.clearTimeout(fallbackTimeoutRef.current);
+        fallbackTimeoutRef.current = null;
+      }
+
+      const scriptId = 'google-maps-script-tag';
+      const s = document.getElementById(scriptId);
+      if (s) s.remove();
+      delete (window as any).google;
+      if (isMounted) {
+        try {
+          googleMapInstance.current = null;
+        } catch {}
+        setLoadFailed(false);
+        setIsLoaded(false);
+
+        // Set a fresh fallback timeout for the new key
+        const newFallback = window.setTimeout(() => {
+          if (isMounted && !googleMapInstance.current) {
+            console.warn('Google Maps did not initialize within 5s after key change. Falling back to Tactical GIS.');
+            setLoadFailed(true);
+          }
+        }, 5000);
+        fallbackTimeoutRef.current = newFallback;
+
+        loadGoogleScript();
+      }
+    };
+    window.addEventListener('pathly_maps_key_changed', handleKeyChange);
+
     return () => {
       isMounted = false;
       window.clearTimeout(fallbackTimeout);
       if (fallbackTimeoutRef.current) window.clearTimeout(fallbackTimeoutRef.current);
       failObserver?.disconnect();
-      markersRef.current.forEach(m => m?.setMap?.(null));
-      polylinesRef.current.forEach(p => p?.setMap?.(null));
+      window.removeEventListener('pathly_maps_key_changed', handleKeyChange);
+      markersRef.current.forEach((m) => m?.setMap?.(null));
+      polylinesRef.current.forEach((p) => p?.setMap?.(null));
       if (focusedMarkerRef.current) focusedMarkerRef.current.setMap(null);
       if (pulseCircleRef.current) pulseCircleRef.current.setMap(null);
       if (pulseIntervalRef.current) window.clearInterval(pulseIntervalRef.current);

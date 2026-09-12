@@ -43,8 +43,9 @@ import { geocodeAddress, reverseGeocode, searchSuggestions, type GeocodingResult
 import { sendFast2SmsOtp } from '../../lib/smsService';
 import { lockScroll, unlockScroll } from '../../lib/scrollLock';
 import { requireAuthAction } from '../../lib/authGate';
+import { getGoogleMapsKey } from '../../lib/googleMapsConfig';
 
-const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
+const GOOGLE_MAPS_API_KEY = getGoogleMapsKey();
 
 const POPULAR_HUBS = [
   { name: 'Guwahati Hub', lat: 26.1445, lng: 91.7362, state: 'Assam' },

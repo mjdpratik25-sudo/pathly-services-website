@@ -29,7 +29,8 @@ import {
   Lock,
   ShieldAlert,
   CreditCard,
-  Hash
+  Hash,
+  Compass
 } from 'lucide-react';
 import { 
   getOpenWeatherMapKey, 
@@ -43,6 +44,13 @@ import {
   testMapboxConnection,
   MAPBOX_STYLES 
 } from '../lib/mapboxConfig';
+import {
+  getGoogleMapsKey,
+  setGoogleMapsKey,
+  clearGoogleMapsKey,
+  testGoogleMapsKey,
+  type GoogleMapsKeyTestResult
+} from '../lib/googleMapsConfig';
 import { 
   getFast2SmsKey, 
   setFast2SmsKey, 
@@ -98,6 +106,11 @@ export default function Settings({
   const [mapboxTesting, setMapboxTesting] = useState(false);
   const [mapboxStatus, setMapboxStatus] = useState<{ success: boolean; message: string } | null>(null);
 
+  // Google Maps Platform API State
+  const [googleMapsKey, setGoogleMapsKeyState] = useState('');
+  const [googleMapsTesting, setGoogleMapsTesting] = useState(false);
+  const [googleMapsStatus, setGoogleMapsStatus] = useState<GoogleMapsKeyTestResult | null>(null);
+
   // 3. Fast2SMS & Twilio SMS State
   const [smsProvider, setSmsProviderState] = useState<SmsProvider>('fast2sms');
   const [fast2smsKey, setFast2smsKeyState] = useState('');
@@ -134,6 +147,7 @@ export default function Settings({
   useEffect(() => {
     setOwmKey(getOpenWeatherMapKey());
     setMapboxTokenState(getMapboxToken());
+    setGoogleMapsKeyState(getGoogleMapsKey());
     setSmsProviderState(getSmsProvider());
     
     const f2sKey = getFast2SmsKey();
@@ -172,6 +186,7 @@ export default function Settings({
     if (!requireAuthAction('Save Settings')) return;
     setOpenWeatherMapKey(owmKey);
     setMapboxToken(mapboxToken);
+    setGoogleMapsKey(googleMapsKey);
     setSmsProvider(smsProvider);
     setFast2SmsKey(fast2smsKey);
     setTwilioConfig(twilioSid, twilioToken, twilioPhone);
@@ -216,6 +231,19 @@ export default function Settings({
     setMapboxStatus(res);
     if (res.success) {
       setMapboxToken(mapboxToken);
+    }
+  };
+
+  // Test Google Maps API Key
+  const handleTestGoogleMaps = async () => {
+    if (!requireAuthAction('Test Google Maps')) return;
+    setGoogleMapsTesting(true);
+    setGoogleMapsStatus(null);
+    const res = await testGoogleMapsKey(googleMapsKey);
+    setGoogleMapsTesting(false);
+    setGoogleMapsStatus(res);
+    if (res.success) {
+      setGoogleMapsKey(googleMapsKey);
     }
   };
 
@@ -762,6 +790,104 @@ export default function Settings({
                     {mapboxStatus.success ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
                     <span>{mapboxStatus.message}</span>
                   </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* API 3: Google Maps Platform */}
+          <div className="p-5 rounded-2xl glass-panel bg-[hsl(var(--card))] border border-[hsl(var(--border))] space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[hsl(var(--border))]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center font-bold">
+                  <Compass size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-[hsl(var(--foreground))] flex items-center gap-2">
+                    <span>3. Google Maps Platform API Key</span>
+                    <span className="text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20">
+                      Free $200/mo Credit
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
+                    Powers high-fidelity Google Maps, Places Autocomplete, Geocoding &amp; traffic layer. Falls back to Tactical GIS (OpenStreetMap) if unavailable.
+                  </p>
+                </div>
+              </div>
+
+              <a
+                href="https://console.cloud.google.com/apis/credentials"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] font-semibold text-red-400 hover:text-red-300 flex items-center gap-1 self-start sm:self-auto"
+              >
+                <span>Google Cloud Console</span>
+                <ExternalLink size={12} />
+              </a>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-[hsl(var(--foreground))] mb-1.5">
+                  Google Maps JavaScript API Key
+                </label>
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Key size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))]" />
+                    <input
+                      type="password"
+                      value={googleMapsKey}
+                      onChange={(e) => setGoogleMapsKeyState(e.target.value)}
+                      placeholder="AIzaSy..."
+                      className="w-full pl-9 pr-3 py-2 bg-[hsl(var(--muted))]/80 border border-[hsl(var(--border))] rounded-lg text-xs font-mono text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-red-500/30 focus:border-red-500"
+                    />
+                  </div>
+                  <button
+                    onClick={handleTestGoogleMaps}
+                    disabled={googleMapsTesting || !googleMapsKey.trim()}
+                    className="px-3.5 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition-all"
+                  >
+                    {googleMapsTesting ? <RefreshCw size={13} className="animate-spin" /> : <Compass size={13} />}
+                    <span>Test Geocoding</span>
+                  </button>
+                  {googleMapsKey.trim() && (
+                    <button
+                      onClick={() => {
+                        clearGoogleMapsKey();
+                        setGoogleMapsKeyState('');
+                        setGoogleMapsStatus({ success: false, message: 'Key cleared. Using Tactical GIS (OpenStreetMap) fallback.', status: 'CLEARED' });
+                      }}
+                      className="p-2 bg-[hsl(var(--muted))] hover:bg-rose-500/20 text-[hsl(var(--muted-foreground))] hover:text-rose-400 rounded-lg transition-colors"
+                      title="Clear Google Maps key & use Tactical GIS"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Info Banner */}
+              <div className="p-2.5 rounded-lg bg-blue-500/5 border border-blue-500/20 text-[11px] text-blue-300 flex items-start gap-2">
+                <Info size={14} className="mt-0.5 flex-shrink-0" />
+                <span>
+                  If no key is provided or the key has billing issues, Pathly automatically switches to <strong>Tactical GIS</strong> (Leaflet + OpenStreetMap) — fully functional, zero cost.
+                </span>
+              </div>
+
+              {/* Status Display */}
+              {googleMapsStatus && (
+                <div className={`p-3 rounded-lg text-xs border ${
+                  googleMapsStatus.success
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                    : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                }`}>
+                  <p className="font-semibold flex items-center gap-1.5">
+                    {googleMapsStatus.success ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+                    <span>{googleMapsStatus.message}</span>
+                  </p>
+                  {googleMapsStatus.status && (
+                    <p className="mt-1 text-[10px] font-mono opacity-70">Status: {googleMapsStatus.status}</p>
+                  )}
                 </div>
               )}
             </div>
