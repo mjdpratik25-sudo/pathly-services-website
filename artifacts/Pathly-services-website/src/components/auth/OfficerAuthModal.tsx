@@ -45,11 +45,12 @@ export interface OfficerProfile {
   clearanceLevel: number;
   loggedInAt: string;
   accountType?: 'admin' | 'officer' | 'user';
+  logisticsPartner?: string;
 }
 
 export const DEFAULT_OFFICER: OfficerProfile = {
   id: 'adm-001',
-  name: 'Pratik Majumder',
+  name: 'Dear User',
   role: 'Admin',
   badgeId: 'REG-CMD-8842',
   department: 'Regional Logistics Control Command',
@@ -59,6 +60,10 @@ export const DEFAULT_OFFICER: OfficerProfile = {
   loggedInAt: new Date().toISOString(),
   accountType: 'admin'
 };
+
+// Neutral display name used wherever a user skips entering their own name —
+// never a previous user's or a developer/test identity.
+export const GUEST_NAME = 'Dear User';
 
 interface OfficerAuthModalProps {
   isOpen: boolean;
@@ -81,7 +86,7 @@ export default function OfficerAuthModal({
   const [name, setName] = useState('');
   const [badgeId, setBadgeId] = useState('');
   const [department, setDepartment] = useState('');
-  const [state, setState] = useState<NERState>('Assam');
+  const [state, setState] = useState<NERState | ''>('');
 
   // OTP State
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
@@ -210,11 +215,11 @@ export default function OfficerAuthModal({
 
     const profile: OfficerProfile = {
       id: `${accountType === 'admin' ? 'adm' : 'usr'}-${Date.now().toString().slice(-4)}`,
-      name: name || (phone === '9864011223' ? 'Pratik Majumder' : accountType === 'admin' ? 'Authorized Officer' : 'Public User'),
+      name: name.trim() || GUEST_NAME,
       role: accountType === 'admin' ? 'Admin' : 'Public User / Transporter',
       badgeId: badgeId || `REG-${accountType === 'admin' ? 'ADM' : 'USR'}-${Math.floor(1000 + Math.random() * 9000)}`,
       department: department || (accountType === 'admin' ? 'Regional Logistics Command' : 'General User Portal'),
-      state,
+      state: state === '' ? 'Assam' : state,
       phone,
       clearanceLevel: accountType === 'admin' ? 4 : 1,
       loggedInAt: new Date().toISOString(),
@@ -238,11 +243,11 @@ export default function OfficerAuthModal({
 
     const profile: OfficerProfile = {
       id: accountType === 'admin' ? 'adm-001' : 'usr-001',
-      name: name.trim() || (effectivePhone === '9864011223' ? 'Pratik Majumder' : accountType === 'admin' ? 'Admin User' : 'Registered User'),
+      name: name.trim() || GUEST_NAME,
       role: accountType === 'admin' ? 'Admin' : 'Public User',
       badgeId: badgeId.trim() || (accountType === 'admin' ? 'REG-CMD-8842' : 'CITIZEN-USER'),
       department: department.trim() || (accountType === 'admin' ? 'Regional Logistics Control' : 'Public Portal'),
-      state,
+      state: state === '' ? 'Assam' : state,
       phone: effectivePhone,
       clearanceLevel: accountType === 'admin' ? 4 : 1,
       loggedInAt: new Date().toISOString(),
@@ -359,12 +364,12 @@ export default function OfficerAuthModal({
 
         {/* Form Body */}
         <div className="p-5 space-y-4 max-h-[72vh] overflow-y-auto">
-          {/* Quick Demo 1-Click Login for Evaluators & Judges */}
+          {/* Quick 1-Click Login for Evaluators & Judges */}
           <div className="p-3 rounded-2xl bg-gradient-to-r from-blue-950/60 via-indigo-950/40 to-slate-900 border border-blue-500/30 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-mono uppercase font-bold text-blue-300 flex items-center gap-1">
                 <Sparkles size={12} className="text-amber-400" />
-                <span>1-Click Evaluator Demo Access</span>
+                <span>1-Click Evaluator Access</span>
               </span>
               <span className="text-[9px] text-emerald-400 font-mono">Instant Entry</span>
             </div>
@@ -524,7 +529,23 @@ export default function OfficerAuthModal({
 
           {/* MODE 2: NEW USER / OFFICER REGISTRATION */}
           {mode === 'signup' && (
-            <form onSubmit={(e) => { e.preventDefault(); handleSendOtp(); }} className="space-y-3">
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              setAuthError(null);
+              if (!name.trim()) {
+                setAuthError('Please enter your full name to register.');
+                return;
+              }
+              if (phone.replace(/\D/g, '').length < 10) {
+                setAuthError('Please enter a valid 10-digit mobile number.');
+                return;
+              }
+              if (!state) {
+                setAuthError('Please select your Primary State.');
+                return;
+              }
+              handleSendOtp();
+            }} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -534,7 +555,7 @@ export default function OfficerAuthModal({
                     type="text"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Pratik Majumder"
+                    placeholder="Your full name"
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"
                   />
                 </div>
@@ -544,7 +565,7 @@ export default function OfficerAuthModal({
                     type="tel"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    placeholder="e.g. 9864011223"
+                    placeholder="e.g. 98XXXXXXXX"
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"
                   />
                 </div>
@@ -555,9 +576,10 @@ export default function OfficerAuthModal({
                   <label className="block text-xs font-semibold text-slate-300 mb-1">Primary State</label>
                   <select
                     value={state}
-                    onChange={(e) => setState(e.target.value as NERState)}
+                    onChange={(e) => setState(e.target.value as NERState | '')}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-blue-500"
                   >
+                    <option value="" disabled>Select State</option>
                     <option value="Assam">Assam</option>
                     <option value="Tripura">Tripura</option>
                     <option value="Meghalaya">Meghalaya</option>

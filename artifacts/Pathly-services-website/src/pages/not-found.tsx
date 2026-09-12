@@ -11,7 +11,7 @@ export default function NotFound() {
       <h1 className="text-4xl font-black font-mono text-[hsl(var(--foreground))]">404</h1>
       <h2 className="text-lg font-bold text-[hsl(var(--foreground))]">Logistics Telemetry Node Not Found</h2>
       <p className="text-xs text-[hsl(var(--muted-foreground))] max-w-sm">
-        The requested GIS corridor, district dashboard, or route simulation does not exist in the active regional registry.
+        The requested GIS corridor, district dashboard, or route record does not exist in the active regional registry.
       </p>
       <Link
         href="/"

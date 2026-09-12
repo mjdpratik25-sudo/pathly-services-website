@@ -15,6 +15,7 @@ import {
   type CargoType 
 } from '../data/nerData';
 import { findOptimalRoutes, type RouteOption } from '../lib/aiEngine';
+import { requireAuthAction } from '../lib/authGate';
 import { useWeatherData } from '../hooks/useWeatherData';
 import RiskGauge from '../components/common/RiskGauge';
 import StatusBadge from '../components/common/StatusBadge';
@@ -29,7 +30,11 @@ export default function RoutePlanner() {
 
   const [isCalculating, setIsCalculating] = useState(false);
   const [routes, setRoutes] = useState<RouteOption[]>(() =>
-    findOptimalRoutes('Guwahati', 'Shillong', weatherData)
+    findOptimalRoutes('Guwahati', 'Shillong', weatherData, {
+      cargoType: 'medicines',
+      cargoWeight: 4.2,
+      priority: 'normal',
+    })
   );
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
   const [dispatchSuccess, setDispatchSuccess] = useState(false);
@@ -37,10 +42,15 @@ export default function RoutePlanner() {
   const hubList = Array.from(new Set(NER_DISTRICTS.map((d) => d.majorTown))).sort();
 
   const handleCalculateRoutes = () => {
+    if (!requireAuthAction('Compute Routes')) return;
     setIsCalculating(true);
     setDispatchSuccess(false);
     setTimeout(() => {
-      const computed = findOptimalRoutes(origin, destination, weatherData);
+      const computed = findOptimalRoutes(origin, destination, weatherData, {
+        cargoType,
+        cargoWeight: cargoType === 'construction' || cargoType === 'fuel' ? 9 : 4.2,
+        priority,
+      });
       setRoutes(computed);
       setSelectedRouteIndex(0);
       setIsCalculating(false);
@@ -54,6 +64,24 @@ export default function RoutePlanner() {
   };
 
   const activeRoute = routes[selectedRouteIndex] || routes[0];
+
+  const activeMaxAltitude =
+    activeRoute?.maxAltitude ??
+    (activeRoute && activeRoute.segments.length > 0
+      ? Math.max(...activeRoute.segments.map((s) => s.altitude || 0))
+      : null);
+
+  const applyPriority = (p: 'normal' | 'emergency') => {
+    setPriority(p);
+    const computed = findOptimalRoutes(origin, destination, weatherData, {
+      cargoType,
+      cargoWeight: cargoType === 'construction' || cargoType === 'fuel' ? 9 : 4.2,
+      priority: p,
+    });
+    setRoutes(computed);
+    setSelectedRouteIndex(0);
+    setDispatchSuccess(false);
+  };
 
   return (
     <div className="space-y-6 animate-fade-in pb-12">
@@ -143,7 +171,7 @@ export default function RoutePlanner() {
               </label>
               <div className="flex gap-2">
                 <button
-                  onClick={() => setPriority('normal')}
+                  onClick={() => applyPriority('normal')}
                   className={`flex-1 py-2 text-xs font-semibold rounded border transition-all cursor-pointer ${
                     priority === 'normal'
                       ? 'bg-[#0B3D6D] border-[#0B3D6D] text-white'
@@ -153,7 +181,7 @@ export default function RoutePlanner() {
                   Standard
                 </button>
                 <button
-                  onClick={() => setPriority('emergency')}
+                  onClick={() => applyPriority('emergency')}
                   className={`flex-1 py-2 text-xs font-semibold rounded border transition-all cursor-pointer ${
                     priority === 'emergency'
                       ? 'bg-[#7A1F1F] border-[#7A1F1F] text-white'
@@ -163,6 +191,11 @@ export default function RoutePlanner() {
                   🚨 SOS
                 </button>
               </div>
+              {priority === 'emergency' && (
+                <p className="text-[10px] font-bold text-[#7A1F1F] leading-tight mt-1">
+                  SOS active — relaxed risk-weighting, corridor cleared, control room notified.
+                </p>
+              )}
             </div>
 
             {/* Compute Button */}
@@ -196,7 +229,6 @@ export default function RoutePlanner() {
 
           {routes.map((rt, idx) => {
             const isSelected = selectedRouteIndex === idx;
-            const isSafest = idx === 0;
 
             return (
               <div
@@ -212,9 +244,9 @@ export default function RoutePlanner() {
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-sm text-slate-900">{rt.name}</span>
-                      {isSafest && (
+                      {rt.isRecommended && (
                         <span className="text-[10px] font-bold text-green-800 bg-green-50 px-2 py-0.5 border border-green-700 font-mono">
-                          ★ RECOMMENDED
+                          ★ RECOMMENDED{priority === 'emergency' ? ' · SOS' : ''}
                         </span>
                       )}
                     </div>
@@ -262,14 +294,20 @@ export default function RoutePlanner() {
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => alert(`Advisory Briefing dispatched for Route ${activeRoute.name}`)}
+                  onClick={() => {
+                    if (!requireAuthAction('Dispatch Route')) return;
+                    alert(`Advisory Briefing dispatched for Route ${activeRoute.name}`);
+                  }}
                   className="px-3.5 py-2 rounded bg-[#0B3D6D] hover:bg-[#0A3560] text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Share2 size={13} />
                   <span>Dispatch Route</span>
                 </button>
                 <button
-                  onClick={() => setDispatchSuccess(true)}
+                  onClick={() => {
+                    if (!requireAuthAction('Assign Fleet')) return;
+                    setDispatchSuccess(true);
+                  }}
                   className="px-4 py-2 rounded bg-[#7A1F1F] hover:bg-[#671a1a] text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <CheckCircle2 size={14} />
@@ -298,7 +336,7 @@ export default function RoutePlanner() {
               <div className="p-3.5 rounded bg-slate-50 border border-slate-200">
                 <span className="text-[10px] uppercase text-slate-500 font-bold font-mono">Max Altitude</span>
                 <p className="text-lg font-bold font-mono text-slate-900 mt-0.5">
-                  {Math.max(...(activeRoute.segments?.map(s => s.altitude || 0) || [650]))} m
+                  {activeMaxAltitude != null ? `${activeMaxAltitude} m` : '—'}
                 </p>
               </div>
               <div className="p-3.5 rounded bg-slate-50 border border-slate-200">
@@ -309,7 +347,12 @@ export default function RoutePlanner() {
               </div>
               <div className="p-3.5 rounded bg-slate-50 border border-slate-200">
                 <span className="text-[10px] uppercase text-slate-500 font-bold font-mono">Risk Index</span>
-                <p className="text-lg font-bold font-mono text-amber-700 mt-0.5">{activeRoute.riskScore}/100</p>
+                <p className={`text-lg font-bold font-mono mt-0.5 ${activeRoute.riskScore >= 70 ? 'text-[#7A1F1F]' : activeRoute.riskScore >= 50 ? 'text-amber-700' : 'text-green-700'}`}>
+                  {activeRoute.riskScore}/100
+                </p>
+                <span className={`inline-block mt-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 ${activeRoute.riskAssessment.riskClassColor}`}>
+                  {activeRoute.riskAssessment.riskClass}
+                </span>
               </div>
               <div className="p-3.5 rounded bg-slate-50 border border-slate-200">
                 <span className="text-[10px] uppercase text-slate-500 font-bold font-mono">Corridor Integrity</span>
@@ -319,10 +362,85 @@ export default function RoutePlanner() {
               </div>
             </div>
 
+            {/* Explainable Risk Model — Objective 4 (weighted rule-based, transparent factors) */}
+            <div className="px-4">
+              <div className="p-3.5 rounded border border-[#d5dbe2] bg-white">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600 font-mono">
+                      🔍 Explainable Risk — Why This Score?
+                    </h4>
+                    <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
+                      {activeRoute.riskAssessment.explanation}
+                    </p>
+                  </div>
+                  <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 bg-slate-100 border border-slate-400 text-slate-700 flex-shrink-0">
+                    Transparency Model
+                  </span>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
+                  {activeRoute.riskAssessment.factors.map((f) => (
+                    <div
+                      key={f.factor}
+                      className="p-2 border border-slate-200 bg-slate-50"
+                      title={f.detail}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-[9px] font-bold uppercase text-slate-500 font-mono truncate">{f.factor}</span>
+                        <span className="text-[10px] font-mono font-bold text-[#0B3D6D]">{f.value}</span>
+                      </div>
+                      <div className="mt-1 h-1 w-full bg-slate-200 overflow-hidden">
+                        <div className="h-full bg-[#FF9933]" style={{ width: `${f.value}%` }} />
+                      </div>
+                      <span className="text-[9px] text-slate-600 font-mono mt-1 block">w={f.weight} · +{f.contribution}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <p className="text-[10px] text-slate-500 mt-2 font-mono">
+                  score = Σ (Wᵢ × factorᵢ) | W = rainfall 0.20 · flood 0.15 · access 0.25 · bridge 0.10 · delay 0.10 · criticality 0.20
+                </p>
+              </div>
+            </div>
+
+            {/* Item 3 — transparent additive cost breakdown (minutes) */}
+            {activeRoute.costBreakdown && activeRoute.costBreakdown.length > 0 && (
+              <div className="px-4">
+                <div className="p-3.5 rounded border border-[#d5dbe2] bg-white">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600 font-mono">
+                      Additive Route Cost — minutes
+                    </h4>
+                    <span className="text-sm font-bold font-mono text-[#0B3D6D]">
+                      {activeRoute.costScore} min
+                    </span>
+                  </div>
+                  <div className="mt-3 space-y-1.5">
+                    {activeRoute.costBreakdown.map((item) => (
+                      <div key={item.label} className="flex items-center justify-between gap-2 text-[11px] font-mono">
+                        <span className="text-slate-600">{item.label}</span>
+                        <span className="font-bold text-slate-900">{item.value} min</span>
+                      </div>
+                    ))}
+                    <div className="pt-1.5 border-t border-slate-200 flex items-center justify-between gap-2 text-[11px] font-mono">
+                      <span className="font-bold text-slate-900">Total composite cost</span>
+                      <span className="font-bold text-[#0B3D6D]">{activeRoute.costScore} min</span>
+                    </div>
+                  </div>
+                  {activeRoute.rejectedReason && (
+                    <p className="mt-2 text-[10px] text-[#7A1F1F] font-semibold bg-red-50 border border-red-200 p-2">
+                      {activeRoute.rejectedReason}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Step-by-Step Waypoints & Bottlenecks */}
             <div className="px-4 space-y-3">
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600 font-mono">
-                Segment Breakdown & Critical Waypoints
+                Segment Breakdown &amp; Critical Waypoints
               </h4>
 
               <div className="space-y-2">
@@ -366,7 +484,9 @@ export default function RoutePlanner() {
                 <span>Driver Cautionary Advisory</span>
               </div>
               <p className="text-xs text-slate-700 leading-relaxed font-medium">
-                Rainfall advisory active in East Khasi Hills & Guwahati corridor. Maintain minimum 50-meter following distance on steep hairpin descents. Radio contact mandatory at every district police checkpost.
+                {priority === 'emergency'
+                  ? 'SOS convoy protocol engaged. Corridor priority granted — district traffic control and checkpost staff have been notified to hold normal traffic clear. Vehicles should maintain assigned convoy spacing and respond by radio call-sign only.'
+                  : 'Rainfall advisory active in East Khasi Hills & Guwahati corridor. Maintain minimum 50-meter following distance on steep hairpin descents. Radio contact mandatory at every district police checkpost.'}
               </p>
             </div>
           </div>

@@ -5,11 +5,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import { INITIAL_WEATHER, NER_DISTRICTS, type WeatherData } from '../data/nerData';
 import { getOpenWeatherMapKey, fetchLiveWeatherByCoords } from '../lib/weatherService';
+import { applyScenarioWeather } from '../lib/scenarioEngine';
 
 export function useWeatherData(refreshIntervalMs = 30000) {
   const [weatherData, setWeatherData] = useState<WeatherData[]>(INITIAL_WEATHER);
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [isLiveApiActive, setIsLiveApiActive] = useState(false);
+
+  // Expose whether we are running without any API keys
+  const hasLiveKey = Boolean(getOpenWeatherMapKey());
+  const dataSourceLabel = isLiveApiActive
+    ? 'live'
+    : hasLiveKey
+      ? 'local (key present but API unavailable)'
+      : 'local weather feed (no API key)';
 
   const fetchOrSimulateWeather = useCallback(async () => {
     const apiKey = getOpenWeatherMapKey();
@@ -87,18 +96,22 @@ export function useWeatherData(refreshIntervalMs = 30000) {
     return () => clearInterval(interval);
   }, [fetchOrSimulateWeather, refreshIntervalMs]);
 
+  // Scenario overrides (DRY data: segment/weather) applied once per render.
+  const scenarioWeather = applyScenarioWeather(weatherData);
+
   const getWeatherForDistrict = useCallback((districtName: string) => {
-    return weatherData.find(w => w.district === districtName);
-  }, [weatherData]);
+    return scenarioWeather.find(w => w.district === districtName);
+  }, [scenarioWeather]);
 
   const getWeatherForState = useCallback((stateName: string) => {
-    return weatherData.filter(w => w.state === stateName);
-  }, [weatherData]);
+    return scenarioWeather.filter(w => w.state === stateName);
+  }, [scenarioWeather]);
 
   return { 
-    weatherData, 
+    weatherData: scenarioWeather, 
     lastUpdated, 
     isLiveApiActive,
+    dataSourceLabel,
     getWeatherForDistrict, 
     getWeatherForState, 
     refresh: fetchOrSimulateWeather 

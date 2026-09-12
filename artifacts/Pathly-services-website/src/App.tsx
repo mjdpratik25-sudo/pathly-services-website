@@ -13,11 +13,16 @@ import Dashboard from './pages/Dashboard';
 import AccessibilityMap from './pages/AccessibilityMap';
 import RoutePlanner from './pages/RoutePlanner';
 import VehicleTracking from './pages/VehicleTracking';
+import DriverMode from './pages/DriverMode';
 import AlertCenter from './pages/AlertCenter';
 import FieldReports from './pages/FieldReports';
 import Analytics from './pages/Analytics';
+import EmergencyScenarioDemo from './pages/EmergencyScenarioDemo';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
+import AuthGatePrompt from './components/auth/AuthGatePrompt';
+import { isDemoMode } from './lib/demoConfig';
+import { RoleProvider, useRole } from './lib/roleAccess';
 import NotFound from './pages/not-found';
 import { useAlerts } from './hooks/useAlerts';
 import { useOfflineSync } from './hooks/useOfflineSync';
@@ -83,6 +88,63 @@ function Footer() {
         <span>{t('lastUpdated')}&nbsp;&nbsp;|&nbsp;&nbsp;{t('visitors')}</span>
       </div>
     </footer>
+  );
+}
+
+// Redirects away from routes the current role cannot access (Item 8).
+function RoleRouteGuard() {
+  const { can } = useRole();
+  const [location, setLocation] = useLocation();
+  useEffect(() => {
+    if (!can(location === '/' ? '/' : location)) setLocation('/');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location, can]);
+  return null;
+}
+
+function MainNav({ isDark }: { isDark: boolean }) {
+  const { can } = useRole();
+  const [location] = useLocation();
+  const allItems = [
+    { href: '/', label: 'Home' },
+    { href: '/accessibility', label: 'Accessibility' },
+    { href: '/routes', label: 'Routes' },
+    { href: '/tracking', label: 'Tracking' },
+    { href: '/driver-mode', label: 'Driver Mode' },
+    { href: '/alerts', label: 'Alerts' },
+    { href: '/field-reports', label: 'Field Reports' },
+    { href: '/analytics', label: 'Analytics' },
+    { href: '/scenario', label: 'Scenario Drill' },
+  ];
+  const items = allItems.filter((item) => can(item.href));
+  return (
+    <nav
+      className={`px-2 sm:px-4 lg:px-6 h-11 sm:h-12 flex items-center justify-between overflow-x-auto scrollbar-none gap-3 ${isDark ? 'bg-[#111316]' : 'bg-white'}`}
+      style={{ WebkitOverflowScrolling: 'touch' }}
+      aria-label="Primary"
+    >
+      {items.map((item) => {
+        const active = item.href === '/' ? location === '/' : location.startsWith(item.href);
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={`flex-shrink-0 text-center px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-[13px] font-medium whitespace-nowrap rounded transition-colors ${
+              active
+                ? isDark
+                  ? 'text-[#FFC107] font-bold bg-[#1e2228]'
+                  : 'text-[#0B3D6D] font-bold bg-blue-50/80'
+                : isDark
+                  ? 'text-slate-300 hover:text-[#FFC107] hover:bg-[#23272d]'
+                  : 'text-slate-600 hover:text-[#0B3D6D] hover:bg-slate-100'
+            }`}
+            aria-current={active ? 'page' : undefined}
+          >
+            {item.label}
+          </Link>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -247,8 +309,13 @@ export default function App() {
   }
 
   return (
+    <RoleProvider>
     <LanguageProvider language={currentLanguage}>
     <div className={`min-h-screen flex ${isDark ? 'bg-black text-slate-100 gov-shell-dark' : 'bg-[#F5F6F8] text-slate-900 gov-shell-light'}`}>
+      {/* Role-aware route guard (redirects inaccessible routes to home) */}
+      <RoleRouteGuard />
+      {/* Guest view-only gate: raises the Sign In / Sign Up prompt on actions */}
+      <AuthGatePrompt />
       {/* Mobile Drawer Overlay */}
       {isMobileSidebarOpen && (
         <div
@@ -301,42 +368,22 @@ export default function App() {
         {/* Proper 3-band tricolor strip directly under header */}
         <div className="gov-tricolor" aria-hidden="true" />
 
+        {/* Standalone-data banner — shows while no external API keys are configured */}
+        {isDemoMode() && (
+          <div className="w-full bg-[#FFF4E0] border-b border-[#E5A633] text-[#7A4E00]">
+            <div className="px-4 lg:px-6 py-1.5 flex items-center justify-between gap-3">
+              <p className="text-[10px] sm:text-[11px] font-semibold flex items-center gap-1.5">
+                <span className="font-black uppercase tracking-wider">STANDALONE</span>
+                <span className="hidden sm:inline">— all weather, maps, routing and SMS run on the built-in regional data feed. No external API keys configured.</span>
+              </p>
+              <a href="/settings" className="text-[10px] font-bold underline flex-shrink-0">Configure keys &rsaquo;</a>
+            </div>
+          </div>
+        )}
+
         {/* Horizontal main navigation menu */}
         <div className={`w-full border-b ${isDark ? 'border-[#3a3f47] bg-[#111316]' : 'border-slate-300 bg-white'}`}>
-          <nav
-            className={`px-2 sm:px-4 lg:px-6 h-11 sm:h-12 flex items-center justify-between overflow-x-auto scrollbar-none gap-3 ${isDark ? 'bg-[#111316]' : 'bg-white'}`}
-            style={{ WebkitOverflowScrolling: 'touch' }}
-            aria-label="Primary"
-          >
-            {[
-              { href: '/', label: 'Home' },
-              { href: '/accessibility', label: 'Accessibility' },
-              { href: '/routes', label: 'Routes' },
-              { href: '/tracking', label: 'Tracking' },
-              { href: '/alerts', label: 'Alerts' },
-              { href: '/analytics', label: 'Analytics' },
-            ].map((item) => {
-              const active = item.href === '/' ? location === '/' : location.startsWith(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`flex-shrink-0 text-center px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-[13px] font-medium whitespace-nowrap rounded transition-colors ${
-                    active
-                      ? isDark
-                        ? 'text-[#FFC107] font-bold bg-[#1e2228]'
-                        : 'text-[#0B3D6D] font-bold bg-blue-50/80'
-                      : isDark
-                        ? 'text-slate-300 hover:text-[#FFC107] hover:bg-[#23272d]'
-                        : 'text-slate-600 hover:text-[#0B3D6D] hover:bg-slate-100'
-                  }`}
-                  aria-current={active ? 'page' : undefined}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
+          <MainNav isDark={isDark} />
         </div>
 
         {/* Breadcrumbs */}
@@ -364,8 +411,10 @@ export default function App() {
             <Route path="/tracking">
               {() => <VehicleTracking isSidebarOpen={!sidebarCollapsed} />}
             </Route>
+            <Route path="/driver-mode" component={DriverMode} />
             <Route path="/alerts" component={AlertCenter} />
             <Route path="/field-reports" component={FieldReports} />
+            <Route path="/scenario" component={EmergencyScenarioDemo} />
             <Route path="/analytics" component={Analytics} />
             <Route path="/settings">
               {() => (
@@ -400,5 +449,6 @@ export default function App() {
       {/* Mobile Sidebar Toggle Button — removed; Header has its own hamburger */}
     </div>
     </LanguageProvider>
+    </RoleProvider>
   );
 }

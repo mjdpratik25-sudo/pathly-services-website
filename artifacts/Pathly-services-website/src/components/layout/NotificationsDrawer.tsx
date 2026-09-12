@@ -22,6 +22,7 @@ import {
 import { useLocation } from 'wouter';
 import { INITIAL_ALERTS, type LogisticsAlert, getAlertSeverityColor } from '../../data/nerData';
 import { sendFast2SmsOtp } from '../../lib/smsService';
+import { requireAuthAction } from '../../lib/authGate';
 
 interface NotificationsDrawerProps {
   isOpen: boolean;
@@ -70,6 +71,7 @@ export default function NotificationsDrawer({
   };
 
   const handleDispatchSmsAlert = async (alert: LogisticsAlert) => {
+    if (!requireAuthAction('Dispatch SMS Alert')) return;
     setSmsSendingId(alert.id);
     const res = await sendFast2SmsOtp('9864011223');
     setSmsSendingId(null);
@@ -125,7 +127,10 @@ export default function NotificationsDrawer({
         <div className="px-5 py-3 bg-slate-50 dark:bg-slate-950/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
             <button
-              onClick={() => setFilter('all')}
+              onClick={() => {
+                if (!requireAuthAction('Filter Notifications')) return;
+                setFilter('all');
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 filter === 'all' 
                   ? 'bg-blue-700 text-white shadow-sm ring-1 ring-blue-600' 
@@ -135,7 +140,10 @@ export default function NotificationsDrawer({
               All ({alerts.length})
             </button>
             <button
-              onClick={() => setFilter('critical')}
+              onClick={() => {
+                if (!requireAuthAction('Filter Notifications')) return;
+                setFilter('critical');
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 filter === 'critical' 
                   ? 'bg-red-700 text-white shadow-sm ring-1 ring-red-600' 
@@ -145,7 +153,10 @@ export default function NotificationsDrawer({
               Critical
             </button>
             <button
-              onClick={() => setFilter('warning')}
+              onClick={() => {
+                if (!requireAuthAction('Filter Notifications')) return;
+                setFilter('warning');
+              }}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 filter === 'warning' 
                   ? 'bg-amber-500 text-slate-900 shadow-sm ring-1 ring-amber-400' 
@@ -157,7 +168,10 @@ export default function NotificationsDrawer({
           </div>
 
           <button
-            onClick={handleMarkAllRead}
+            onClick={() => {
+              if (!requireAuthAction('Mark All Read')) return;
+              handleMarkAllRead();
+            }}
             className="text-[11px] text-blue-700 dark:text-blue-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
           >
             <CheckCheck size={13} />

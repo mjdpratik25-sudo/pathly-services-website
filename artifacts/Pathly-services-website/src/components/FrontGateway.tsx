@@ -118,7 +118,7 @@ export const FrontGateway: React.FC<FrontGatewayProps> = ({ onAuthenticate, onEx
       setIsVerifying(false);
       onAuthenticate({
         id: 'usr_g_' + Math.random().toString(36).substring(2, 9),
-        name: 'Pratik Majumder',
+        name: 'Dear User',
         email: 'pratik.ne@gmail.com',
         phone: '+91 98621 54321',
         state: userState,
@@ -425,7 +425,7 @@ export const FrontGateway: React.FC<FrontGatewayProps> = ({ onAuthenticate, onEx
                           <label className="block text-xs font-semibold text-emerald-100/90 mb-1">Your Full Name</label>
                           <input
                             type="text" required value={userName} onChange={(e) => setUserName(e.target.value)}
-                            placeholder="e.g. Pratik Majumder"
+                            placeholder="Your full name"
                             className="w-full px-3.5 py-2.5 rounded-xl bg-[#071d1b] border border-white/15 text-white text-sm outline-none focus:border-[#f27e68] focus:ring-1 focus:ring-[#f27e68]"
                           />
                         </div>

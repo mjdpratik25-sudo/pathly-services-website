@@ -1,0 +1,38 @@
+[
+  {
+    "id": "U-ADMIN",
+    "username": "admin",
+    "role": "admin",
+    "displayName": "Pathly System Administrator",
+    "department": "IT Operations",
+    "salt": "78ee2e08322396924a5093641fda61ff",
+    "passwordHash": "da14f6332c0f855f38fa69ff25e14c6562f53c09a12b1eb920c087c889742152e86fa6693ae2246c752825664cd627ecbf58ba6e977a16fdd08679a2eb6c8e2b"
+  },
+  {
+    "id": "U-CR",
+    "username": "control-room",
+    "role": "state_control_room",
+    "displayName": "State Control Room Operator",
+    "department": "NER Emergency Operations",
+    "salt": "b865f2e8dcf0906dff8eee0a88554fa2",
+    "passwordHash": "d9aa8617f670d17e8cd72fb3acc9c63c3bab6ce07ed3b42d1368ce13a1aef2f5d0f63092cfae7be3d601900d9f60abeae8c7bfe3fc597c33ac5134822f6ebe79"
+  },
+  {
+    "id": "U-DO",
+    "username": "officer",
+    "role": "field_officer",
+    "displayName": "District Field Officer",
+    "department": "Field Surveillance",
+    "salt": "abf241a0cfa886e527a0347cb4e6b4a7",
+    "passwordHash": "63eed827d0f4b2e6d71c803f86c53dade1d5525e491aa4697ce3ba969ce03a68d63a676ed6151bd05e363fbde3665b73823441d43d29997061fac480c25680d7"
+  },
+  {
+    "id": "U-DRV",
+    "username": "driver",
+    "role": "driver",
+    "displayName": "Fleet Transporter",
+    "department": "Transport Operations",
+    "salt": "bb5c842c8f3442924a3c437997412fee",
+    "passwordHash": "066ca87698b1522ad57f9790c2d5e1b9721f803e754a971ade82dcd3e5e4bbcc89693b3be4aa0f0554d1872bca1f1340aa621088384f85ab09d5c4c590f8e637"
+  }
+]

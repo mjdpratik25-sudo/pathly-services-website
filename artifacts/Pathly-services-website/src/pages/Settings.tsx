@@ -63,6 +63,7 @@ import {
   sendLocalOrFirebaseNotification, 
   type FirebaseWebConfig 
 } from '../lib/firebaseService';
+import { requireAuthAction } from '../lib/authGate';
 
 interface SettingsProps {
   currentLanguage: string;
@@ -168,6 +169,7 @@ export default function Settings({
   }, [otpCountdown]);
 
   const handleSaveAll = () => {
+    if (!requireAuthAction('Save Settings')) return;
     setOpenWeatherMapKey(owmKey);
     setMapboxToken(mapboxToken);
     setSmsProvider(smsProvider);
@@ -189,6 +191,7 @@ export default function Settings({
 
   // 1. Test OpenWeatherMap Connection
   const handleTestOwm = async () => {
+    if (!requireAuthAction('Test OpenWeatherMap')) return;
     setOwmTesting(true);
     setOwmStatus(null);
     const res = await testOpenWeatherMapConnection(owmKey);
@@ -205,6 +208,7 @@ export default function Settings({
 
   // 2. Test Mapbox Token
   const handleTestMapbox = async () => {
+    if (!requireAuthAction('Test Mapbox')) return;
     setMapboxTesting(true);
     setMapboxStatus(null);
     const res = await testMapboxConnection(mapboxToken);
@@ -217,6 +221,7 @@ export default function Settings({
 
   // 3. Fast2SMS Balance Check
   const handleCheckBalance = async () => {
+    if (!requireAuthAction('Check SMS Balance')) return;
     setCheckingBalance(true);
     const res = await checkFast2SmsBalance(fast2smsKey);
     setCheckingBalance(false);
@@ -227,6 +232,7 @@ export default function Settings({
 
   // 4. Send Fast2SMS OTP
   const handleSendOtp = async () => {
+    if (!requireAuthAction('Send Test OTP')) return;
     setOtpSending(true);
     setOtpStatus(null);
     setVerifiedSuccess(false);
@@ -254,6 +260,7 @@ export default function Settings({
 
   // 5. Verify Fast2SMS OTP
   const handleVerifyOtp = () => {
+    if (!requireAuthAction('Verify Test OTP')) return;
     setOtpVerifying(true);
     const res = verifyFast2SmsOtp(otpPhone, enteredOtp);
     setOtpVerifying(false);
@@ -273,6 +280,7 @@ export default function Settings({
 
   // 6. Test Driver SMS Dispatch
   const handleTestSms = async () => {
+    if (!requireAuthAction('Test Driver SMS')) return;
     setSmsTesting(true);
     setSmsStatus(null);
 
@@ -300,6 +308,7 @@ export default function Settings({
 
   // 7. Test Firebase Push Notification
   const handleTestPush = async () => {
+    if (!requireAuthAction('Test Push Notification')) return;
     setPushTesting(true);
     setPushStatus(null);
 
@@ -762,13 +771,13 @@ export default function Settings({
           <div className="p-5 rounded-2xl glass-panel bg-[hsl(var(--card))] border border-[hsl(var(--border))] space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[hsl(var(--border))]">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center font-bold">
+                <div className="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 flex items-center justify-center font-bold">
                   <Flame size={18} />
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-[hsl(var(--foreground))] flex items-center gap-2">
                     <span>4. Firebase Web App & Push Alerts</span>
-                    <span className="text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20">
+                    <span className="text-[10px] font-mono font-bold bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-500/20">
                       Cloud Messaging (FCM)
                     </span>
                   </h3>
@@ -782,7 +791,7 @@ export default function Settings({
                 href="https://console.firebase.google.com/"
                 target="_blank"
                 rel="noreferrer"
-                className="text-[11px] font-semibold text-amber-400 hover:text-amber-300 flex items-center gap-1 self-start sm:self-auto"
+                className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 flex items-center gap-1 self-start sm:self-auto"
               >
                 <span>Firebase Console</span>
                 <ExternalLink size={12} />

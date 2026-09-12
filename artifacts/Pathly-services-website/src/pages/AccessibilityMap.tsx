@@ -2,7 +2,7 @@
 // AccessibilityMap: District-level GIS & Topological Road Surveillance
 // ============================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Search,
   Filter,
@@ -22,7 +22,10 @@ import {
   Users,
   Train,
   Plane,
-  ChevronRight
+  ChevronRight,
+  Maximize2,
+  Minimize2,
+  Printer
 } from 'lucide-react';
 import GoogleNERMap from '../components/maps/GoogleNERMap';
 import TacticalNERMap from '../components/maps/TacticalNERMap';
@@ -33,10 +36,12 @@ import {
   ROAD_SEGMENTS,
   type NERDistrict,
   type NERState,
+  type RoadSegment,
   getConnectivityStatus
 } from '../data/nerData';
 import { useVehicleTracking } from '../hooks/useVehicleTracking';
 import { useAlerts } from '../hooks/useAlerts';
+import { requireAuthAction } from '../lib/authGate';
 
 // Geographic center + zoom for each state selector pill (and the all-states view)
 const STATE_CENTERS: Record<NERState | 'ALL', { lat: number; lng: number; zoom: number }> = {
@@ -63,6 +68,117 @@ export default function AccessibilityMap({ isSidebarOpen = true }: { isSidebarOp
   const [showAlerts, setShowAlerts] = useState(true);
   const [mapEngine, setMapEngine] = useState<'google' | 'tactical'>('google');
 
+  // Item 10 — improved map: layer toggles, forecast window, legend, fullscreen, report.
+  const [showFloodZones, setShowFloodZones] = useState(true);
+  const [showLandslide, setShowLandslide] = useState(true);
+  const [timeWindowH, setTimeWindowH] = useState(6);
+  const [showOnlyAffected, setShowOnlyAffected] = useState(false);
+  const [showLegend, setShowLegend] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const mapWrapRef = useRef<HTMLDivElement | null>(null);
+
+  const toggleFullscreen = () => {
+    const el = mapWrapRef.current;
+    if (!el) return;
+    if (!document.fullscreenElement) {
+      el.requestFullscreen()?.then(() => setIsFullscreen(true)).catch(() => {});
+    } else {
+      document.exitFullscreen()?.then(() => setIsFullscreen(false)).catch(() => {});
+    }
+  };
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
+  // Routes flagable as affected within the selected forecast window
+  // (approximated from live segment status, delay and risk — DEMO).
+  const affectedRoutes = useMemo(() => {
+    return ROAD_SEGMENTS.filter((s) => {
+      const baseAffected = s.status !== 'open';
+      const riskAffected = (s.riskScore ?? 0) >= 60;
+      const delayAffects = (s.delayMinutes ?? Number.MAX_SAFE_INTEGER) <= timeWindowH * 60;
+      return baseAffected || riskAffected || (delayAffects ? (s.delayMinutes ?? 0) > 0 : false);
+    });
+  }, [timeWindowH]);
+
+  const stateDistrictNames = useMemo(() => {
+    const set = new Set<string>();
+    NER_DISTRICTS.filter((d) => selectedState === 'ALL' || d.state === selectedState).forEach((d) => {
+      set.add(d.name.toLowerCase());
+      set.add(d.majorTown.toLowerCase());
+    });
+    return set;
+  }, [selectedState]);
+
+  const visibleAffectedRoutes = showOnlyAffected
+    ? affectedRoutes.filter((s) =>
+        [s.name, s.from, s.to].some((v) => {
+          const q = v.toLowerCase();
+          return [...stateDistrictNames].some((n) => q.includes(n));
+        })
+      )
+    : [];
+
+  // Route comparison for the selected district (primary vs alternate NH corridor).
+  const districtRoutes = useMemo(() => {
+    if (!selectedDistrict || selectedDistrict.nhConnected.length === 0) return [];
+    return ROAD_SEGMENTS
+      .filter((s) => selectedDistrict.nhConnected.some((nh) => s.name.includes(nh)))
+      .sort((a, b) => {
+        const score = (seg: RoadSegment) => (seg.riskScore ?? 0) + (seg.delayMinutes ?? 0) * 2 + (seg.status === 'open' ? 0 : seg.status === 'partially_blocked' ? 30 : 100);
+        return score(a) - score(b);
+      });
+  }, [selectedDistrict]);
+
+  // Printable situation report (window → browser print / Save as PDF).
+  const buildSituationReport = () => {
+    if (!requireAuthAction('Situation Report')) return;
+    const now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+    const bySeverity = alerts.reduce<Record<string, number>>((acc, a) => {
+      acc[a.severity] = (acc[a.severity] ?? 0) + 1;
+      return acc;
+    }, {});
+    const fleetCount = vehicles.length;
+    const rows = affectedRoutes
+      .map(
+        (s) => `<tr><td>${s.name}</td><td>${s.status.replace(/_/g, ' ')}</td><td>${s.condition}/100</td><td>${s.delayMinutes ?? 0} min</td><td>${s.riskScore ?? 0}/100</td></tr>`
+      )
+      .join('');
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Pathly Situation Report — ${now}</title>
+      <style>body{font-family:-apple-system,'Segoe UI',Arial,sans-serif;color:#111;padding:24px;font-size:12px}
+      header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #FF9933;padding-bottom:12px}
+      h1{font-size:18px;margin:0;color:#0B3D6D}.badge{font-size:10px;font-weight:700;letter-spacing:1px;color:#7A1F1F}
+      h2{font-size:13px;margin:20px 0 6px;border-bottom:1px solid #ccc;padding-bottom:4px}
+      table{width:100%;border-collapse:collapse;margin-top:6px}th,td{border:1px solid #ccc;padding:5px 8px;text-align:left}
+      th{background:#f1f5f9;text-transform:uppercase;font-size:10px;letter-spacing:0.5px}
+      .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:6px}
+      .card{border:1px solid #ddd;padding:10px} .card b{font-size:20px;color:#0B3D6D}
+      .note{font-size:10px;color:#555;margin-top:12px;font-style:italic}</style></head><body>
+      <header><div><h1>Pathly Situation Report</h1><div style="font-size:11px;margin-top:2px">NER Regional Command · Live operational snapshot</div></div>
+      <div style="text-align:right"><span class="badge">GENERATED ${now}</span></div></header>
+      <h2>Summary</h2>
+      <div class="grid">
+        <div class="card">Routes flagged affected (${timeWindowH}h)<b>${affectedRoutes.length}</b></div>
+        <div class="card">Active alerts<b>${alerts.length}</b></div>
+        <div class="card">Fleet vehicles<b>${fleetCount}</b></div>
+        <div class="card">Districts monitored<b>${NER_DISTRICTS.length}</b></div>
+      </div>
+      <h2>Affected Routes in Next ${timeWindowH} Hours</h2>
+      <table><thead><tr><th>Corridor</th><th>Status</th><th>Condition</th><th>Delay</th><th>Risk</th></tr></thead><tbody>${rows || '<tr><td colspan="5">No routes flagged affected.</td></tr>'}</tbody></table>
+      <h2>Alert Mix</h2>
+      <table><thead><tr><th>Severity</th><th>Count</th></tr></thead><tbody>${Object.entries(bySeverity).map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('') || '<tr><td colspan="2">No alerts.</td></tr>'}</tbody></table>
+      <p class="note">Honest-data notice: status values are derived from the NER road-segment fixtures and live telemetry cache. Forecast "next ${timeWindowH} hours" is an approximation from current delay/risk — not a probabilistic prediction. Every panel labels its data source.</p>
+      </body></html>`;
+    const win = window.open('', '_blank', 'width=900,height=720');
+    if (!win) return;
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+
   // Deep Link Location Coordinates from Top Search
   const [customCenter, setCustomCenter] = useState<{ lat: number; lng: number } | null>(null);
   const [customZoom, setCustomZoom] = useState<number | null>(null);
@@ -75,6 +191,28 @@ export default function AccessibilityMap({ isSidebarOpen = true }: { isSidebarOp
 
   const { vehicles } = useVehicleTracking();
   const { alerts } = useAlerts();
+
+  // Guest view-only: state selector and district filters require sign-in.
+  const handleSelectState = (st: NERState | 'ALL') => {
+    if (!requireAuthAction('Filter by State')) return;
+    setSelectedState(st);
+    const c = STATE_CENTERS[st];
+    setCustomCenter({ lat: c.lat, lng: c.lng });
+    setCustomZoom(c.zoom);
+  };
+
+  const corridorStatusBadge = (seg: RoadSegment): React.ReactNode => {
+    if (seg.status === 'blocked') {
+      return <span className="text-[9px] font-bold uppercase tracking-wider text-white bg-[#7A1F1F] px-1.5 py-0.5">Blocked</span>;
+    }
+    if (seg.status === 'partially_blocked') {
+      return <span className="text-[9px] font-bold uppercase tracking-wider text-[#B45309] bg-amber-50 border border-amber-600 px-1.5 py-0.5">At Risk</span>;
+    }
+    if (seg.status === 'under_repair') {
+      return <span className="text-[9px] font-bold uppercase tracking-wider text-[#0B3D6D] bg-blue-50 border border-[#0B3D6D]/50 px-1.5 py-0.5">Repair</span>;
+    }
+    return <span className="text-[9px] font-bold uppercase tracking-wider text-[#138808] bg-green-50 border border-green-700 px-1.5 py-0.5">Open</span>;
+  };
 
   // Helper to parse query parameters or handle deep navigation
   const processLocationDeepLink = () => {
@@ -205,11 +343,7 @@ export default function AccessibilityMap({ isSidebarOpen = true }: { isSidebarOp
       >
         <button
           type="button"
-          onClick={() => {
-            setSelectedState('ALL');
-            setCustomCenter({ lat: STATE_CENTERS.ALL.lat, lng: STATE_CENTERS.ALL.lng });
-            setCustomZoom(STATE_CENTERS.ALL.zoom);
-          }}
+          onClick={() => handleSelectState('ALL')}
           className={`px-4 py-2 text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 border-r border-slate-300 dark:border-slate-700 ${selectedState === 'ALL'
               ? 'bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white'
               : 'bg-white dark:bg-slate-900/90 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
@@ -229,12 +363,7 @@ export default function AccessibilityMap({ isSidebarOpen = true }: { isSidebarOp
             <button
               key={st.name}
               type="button"
-              onClick={() => {
-                setSelectedState(st.name);
-                const c = STATE_CENTERS[st.name];
-                setCustomCenter({ lat: c.lat, lng: c.lng });
-                setCustomZoom(c.zoom);
-              }}
+              onClick={() => handleSelectState(st.name)}
               className={`px-3.5 py-2 text-xs font-semibold whitespace-nowrap flex items-center gap-2 transition-all cursor-pointer border-r border-slate-300 dark:border-slate-700 last:border-r-0 ${isSelected
                   ? 'bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white font-bold'
                   : 'bg-white dark:bg-slate-900/90 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
@@ -255,7 +384,112 @@ export default function AccessibilityMap({ isSidebarOpen = true }: { isSidebarOp
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Interactive Map (2 Cols) */}
         <div className="lg:col-span-2 space-y-4">
-          <div className="overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-900 h-[420px] sm:h-[520px] lg:h-[680px]">
+          {/* Item 10 — analysis toolbar: layers, forecast window, legend, fullscreen, report */}
+          <div className="border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 border-b border-slate-300 dark:border-slate-700">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 font-bold flex items-center gap-1">
+                <Layers size={12} /> Layers
+              </span>
+              {[
+                { key: 'roads', label: 'Roads', active: showRoads, on: () => setShowRoads((v) => !v) },
+                { key: 'vehicles', label: 'Vehicles', active: showVehicles, on: () => setShowVehicles((v) => !v) },
+                { key: 'alerts', label: 'Alerts', active: showAlerts, on: () => setShowAlerts((v) => !v) },
+                { key: 'floodZones', label: 'Flood Zones', active: showFloodZones, on: () => setShowFloodZones((v) => !v) },
+                { key: 'landslide', label: 'Landslide', active: showLandslide, on: () => setShowLandslide((v) => !v) },
+              ].map((l) => (
+                <button
+                  key={l.key}
+                  type="button"
+                  onClick={l.on}
+                  aria-pressed={l.active}
+                  className={`px-2 py-0.5 text-[11px] font-bold border transition-colors cursor-pointer ${
+                    l.active
+                      ? 'bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white border-slate-400 dark:border-slate-600'
+                      : 'bg-transparent text-slate-500 dark:text-slate-400 border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2">
+              <div className="flex items-center gap-2 min-w-[220px]">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 font-bold flex-shrink-0">
+                  Forecast window
+                </span>
+                <input
+                  type="range"
+                  min={1}
+                  max={24}
+                  value={timeWindowH}
+                  onChange={(e) => setTimeWindowH(parseInt(e.target.value, 10))}
+                  aria-label="Forecast window in hours"
+                  className="flex-1 cursor-pointer accent-[#0B3D6D]"
+                />
+                <span className="text-[11px] font-mono font-bold text-slate-700 dark:text-slate-300 w-8 text-right">
+                  {timeWindowH}h
+                </span>
+              </div>
+
+              <label className="flex items-center gap-1.5 cursor-pointer text-[11px] font-medium text-slate-600 dark:text-slate-300" htmlFor="affected-only">
+                <input
+                  id="affected-only"
+                  type="checkbox"
+                  checked={showOnlyAffected}
+                  onChange={(e) => setShowOnlyAffected(e.target.checked)}
+                  className="accent-[#0B3D6D]"
+                />
+                Show only routes affected in next {timeWindowH} hours
+              </label>
+
+              <div className="ml-auto flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setShowLegend((v) => !v)}
+                  aria-pressed={showLegend}
+                  className="px-2 py-1 text-[11px] font-bold border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  Legend {showLegend ? '▾' : '▸'}
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  className="px-2 py-1 text-[11px] font-bold border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer flex items-center gap-1"
+                >
+                  {isFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+                  {isFullscreen ? 'Exit' : 'Fullscreen'}
+                </button>
+                <button
+                  type="button"
+                  onClick={buildSituationReport}
+                  className="px-2 py-1 text-[11px] font-bold border border-[#0B3D6D] bg-[#0B3D6D] text-white hover:bg-blue-800 cursor-pointer flex items-center gap-1"
+                >
+                  <Printer size={12} />
+                  Situation Report (PDF)
+                </button>
+              </div>
+            </div>
+
+            {/* Legend */}
+            {showLegend && (
+              <div className="px-3 py-2 border-t border-slate-300 dark:border-slate-700 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[10px] text-slate-600 dark:text-slate-400">
+                <span className="font-mono uppercase tracking-wider text-slate-500 dark:text-slate-500 font-bold">Legend</span>
+                <span className="flex items-center gap-1.5"><span className="w-3 h-1 bg-blue-600 inline-block" /> Road network</span>
+                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-600 inline-block" /> Active vehicle</span>
+                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-600 inline-block" /> Critical alert</span>
+                <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block" /> Warning alert</span>
+                {showFloodZones && <span className="flex items-center gap-1.5"><span className="w-3 h-3 bg-indigo-300 border border-indigo-600 inline-block" /> Flood-prone zone</span>}
+                {showLandslide && <span className="flex items-center gap-1.5"><span className="w-3 h-3 bg-orange-300 border border-orange-600 inline-block" /> Landslide corridor</span>}
+              </div>
+            )}
+          </div>
+
+          <div
+            ref={mapWrapRef}
+            className="overflow-hidden border border-slate-300 dark:border-slate-700 bg-slate-900 h-[420px] sm:h-[520px] lg:h-[680px]"
+            style={isFullscreen ? { height: '100vh', width: '100vw' } : undefined}
+          >
             {mapEngine === 'google' ? (
               <GoogleNERMap
                 vehicles={vehicles}
@@ -330,6 +564,91 @@ export default function AccessibilityMap({ isSidebarOpen = true }: { isSidebarOp
               </div>
             </div>
           </div>
+
+          {/* Item 10 — routes affected within the forecast window */}
+          <div className="border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
+            <div className="flex items-center justify-between flex-wrap gap-2 px-3 py-2 border-b border-slate-300 dark:border-slate-700">
+              <div className="flex items-center gap-2">
+                <AlertTriangle size={13} className="text-amber-600" />
+                <span className="text-[11px] font-mono uppercase tracking-wider font-bold text-slate-600 dark:text-slate-400">
+                  Corridors Flagged Affected — Next {timeWindowH} Hours
+                </span>
+                <span className="text-[10px] font-mono text-slate-500 dark:text-slate-500">
+                  ({affectedRoutes.length} of {ROAD_SEGMENTS.length} routes)
+                </span>
+              </div>
+              {showOnlyAffected && visibleAffectedRoutes.length > 0 && (
+                <span className="text-[10px] text-slate-500 dark:text-slate-500">
+                  Filtered to <strong className="text-amber-700 dark:text-amber-400">{visibleAffectedRoutes.length}</strong> affecting {selectedState === 'ALL' ? 'all states' : selectedState}
+                </span>
+              )}
+            </div>
+            <div className="divide-y divide-slate-200 dark:divide-slate-700 max-h-[220px] overflow-y-auto">
+              {(showOnlyAffected ? visibleAffectedRoutes : affectedRoutes).slice(0, 12).map((s) => {
+                const cb = corridorStatusBadge(s);
+                return (
+                  <div key={s.id} className="px-3 py-2 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-900 dark:text-white">{s.name}</p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-500">{s.from} → {s.to} · {s.distance} km</p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {cb}
+                      <span className="text-[10px] font-mono text-slate-500 dark:text-slate-500">
+                        {s.delayMinutes ?? 0} min · risk {s.riskScore ?? 0}/100
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+              {affectedRoutes.length === 0 && (
+                <p className="px-3 py-3 text-[11px] text-slate-500 dark:text-slate-400">
+                  No routes flagged affected within the {timeWindowH}h forecast window.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Item 10 — route comparison for the selected district */}
+          {districtRoutes.length > 0 && selectedDistrict && (
+            <div className="border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900">
+              <div className="flex items-center justify-between flex-wrap gap-2 px-3 py-2 border-b border-slate-300 dark:border-slate-700">
+                <div className="flex items-center gap-2">
+                  <Navigation size={13} className="text-[#0B3D6D]" />
+                  <span className="text-[11px] font-mono uppercase tracking-wider font-bold text-slate-600 dark:text-slate-400">
+                    Route Comparison — {selectedDistrict.name} ({selectedDistrict.nhConnected.join(', ')})
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-500 dark:text-slate-500">Ranked by lowest risk × delay</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-500 border-b border-slate-200 dark:border-slate-700">
+                      <th className="py-2 px-3 font-bold">Rank</th>
+                      <th className="py-2 pr-3 font-bold">Corridor</th>
+                      <th className="py-2 pr-3 font-bold">Status</th>
+                      <th className="py-2 pr-3 font-bold">Condition</th>
+                      <th className="py-2 pr-3 font-bold">Delay</th>
+                      <th className="py-2 px-3 font-bold">Risk</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {districtRoutes.map((s, i) => (
+                      <tr key={s.id} className={`border-b border-slate-100 dark:border-slate-800 ${i === 0 ? 'bg-emerald-50/60 dark:bg-emerald-900/10' : i === 1 ? 'bg-amber-50/40 dark:bg-amber-900/10' : ''}`}>
+                        <td className="py-2 px-3 font-black">{i + 1}</td>
+                        <td className="py-2 pr-3 font-semibold text-slate-900 dark:text-white">{s.name}</td>
+                        <td className="py-2 pr-3">{corridorStatusBadge(s)}</td>
+                        <td className="py-2 pr-3 font-mono text-slate-600 dark:text-slate-300">{s.condition}/100</td>
+                        <td className="py-2 pr-3 font-mono text-slate-600 dark:text-slate-300">{s.delayMinutes ?? 0} min</td>
+                        <td className="py-2 px-3 font-mono text-slate-600 dark:text-slate-300">{s.riskScore ?? 0}/100</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right District Inspector Panel (1 Col) */}
@@ -350,7 +669,10 @@ export default function AccessibilityMap({ isSidebarOpen = true }: { isSidebarOp
             <div className="flex gap-0 border border-slate-300 dark:border-slate-600">
               <button
                 type="button"
-                onClick={() => setStatusFilter('ALL')}
+                onClick={() => {
+                  if (!requireAuthAction('Filter Districts')) return;
+                  setStatusFilter('ALL');
+                }}
                 className={`flex-1 py-2 text-[11px] font-bold border-r border-slate-300 dark:border-slate-600 transition-all cursor-pointer ${statusFilter === 'ALL'
                     ? 'bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white'
                     : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50'
@@ -360,7 +682,10 @@ export default function AccessibilityMap({ isSidebarOpen = true }: { isSidebarOp
               </button>
               <button
                 type="button"
-                onClick={() => setStatusFilter('CRITICAL')}
+                onClick={() => {
+                  if (!requireAuthAction('Filter Districts')) return;
+                  setStatusFilter('CRITICAL');
+                }}
                 className={`flex-1 py-2 text-[11px] font-bold border-r border-slate-300 dark:border-slate-600 transition-all cursor-pointer ${statusFilter === 'CRITICAL'
                     ? 'bg-rose-100 dark:bg-rose-900/30 text-rose-800 dark:text-rose-300'
                     : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50'
@@ -370,7 +695,10 @@ export default function AccessibilityMap({ isSidebarOpen = true }: { isSidebarOp
               </button>
               <button
                 type="button"
-                onClick={() => setStatusFilter('GOOD')}
+                onClick={() => {
+                  if (!requireAuthAction('Filter Districts')) return;
+                  setStatusFilter('GOOD');
+                }}
                 className={`flex-1 py-2 text-[11px] font-bold transition-all cursor-pointer ${statusFilter === 'GOOD'
                     ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300'
                     : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50'

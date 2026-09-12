@@ -116,7 +116,7 @@ export async function fetchLiveWeatherByCoords(
   apiKey?: string
 ): Promise<WeatherData | null> {
   const key = (apiKey || getOpenWeatherMapKey()).trim();
-  if (!key) return null;
+  if (!key) return null; // caller falls back to fixture data
 
   try {
     const url = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lng}&appid=${key}&units=metric`;

@@ -22,7 +22,10 @@ import {
   Hash
 } from 'lucide-react';
 import StatusBadge from '../components/common/StatusBadge';
+import DataProvenance from '../components/common/DataProvenance';
 import { useOfflineSync } from '../hooks/useOfflineSync';
+import { RoleGate } from '../lib/roleAccess';
+import { useUserLocation } from '../hooks/useUserLocation';
 import { 
   NER_STATES, 
   type AlertCategory, 
@@ -30,6 +33,7 @@ import {
   type NERState 
 } from '../data/nerData';
 import { sendFast2SmsOtp, verifyFast2SmsOtp } from '../lib/smsService';
+import { requireAuthAction } from '../lib/authGate';
 
 export default function FieldReports() {
   const { 
@@ -40,8 +44,17 @@ export default function FieldReports() {
     lastSyncTime, 
     pendingCount, 
     syncPendingReports, 
-    submitReport 
+    submitReport,
+    reviewReport,
+    resolveReport,
+    pendingReports,
+    reviewedReports,
+    resolvedReports,
+    syncHistory,
+    serverConnected,
   } = useOfflineSync();
+
+  const userLocation = useUserLocation();
 
   // Form State
   const [officerName, setOfficerName] = useState('Anurag Bora');
@@ -55,33 +68,55 @@ export default function FieldReports() {
   const [otpCountdown, setOtpCountdown] = useState(0);
   const [otpStatusMsg, setOtpStatusMsg] = useState<{ success: boolean; message: string; code?: string } | null>(null);
 
-  const [district, setDistrict] = useState('Kamrup Metropolitan');
-  const [state, setState] = useState<NERState>('Assam');
+  const [district, setDistrict] = useState(userLocation.districtName ?? 'Kamrup Metropolitan');
+  const [state, setState] = useState<NERState>(userLocation.state ?? 'Assam');
   const [category, setCategory] = useState<AlertCategory | 'infrastructure' | 'general'>('landslide');
   const [severity, setSeverity] = useState<AlertSeverity>('critical');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [photoAttached, setPhotoAttached] = useState(false);
+  const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
+  const [photoName, setPhotoName] = useState('');
   const [isDetectingGps, setIsDetectingGps] = useState(false);
-  const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number }>({ lat: 26.1445, lng: 91.7362 });
+  const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number }>(
+    userLocation.lat && userLocation.lng
+      ? { lat: userLocation.lat, lng: userLocation.lng }
+      : { lat: 26.1445, lng: 91.7362 }
+  );
   const [formSuccess, setFormSuccess] = useState(false);
 
+  // ---- Real GPS detection ----
   const handleDetectGPS = () => {
+    if (!requireAuthAction('Re-Lock GPS')) return;
+    if (!navigator.geolocation) return;
     setIsDetectingGps(true);
-    setTimeout(() => {
-      setGpsCoords({
-        lat: 26.1445 + (Math.random() - 0.5) * 0.1,
-        lng: 91.7362 + (Math.random() - 0.5) * 0.1,
-      });
-      setIsDetectingGps(false);
-    }, 800);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setGpsCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setIsDetectingGps(false);
+      },
+      () => setIsDetectingGps(false),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  // ---- Real camera capture ----
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoName(file.name);
+    setPhotoAttached(true);
+    const reader = new FileReader();
+    reader.onload = () => setPhotoDataUrl(reader.result as string);
+    reader.readAsDataURL(file);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!requireAuthAction('Submit Field Report')) return;
     if (!title || !description) return;
 
-    submitReport({
+    const result = submitReport({
       officerName,
       officerId,
       district,
@@ -91,14 +126,23 @@ export default function FieldReports() {
       title,
       description,
       photoAttached,
+      photoDataUrl: photoDataUrl ?? undefined,
+      photoName: photoName || undefined,
       lat: gpsCoords.lat,
       lng: gpsCoords.lng,
     });
 
+    if (result === null) {
+      // dedup rejected — show inline warning
+      setFormSuccess(false);
+      return;
+    }
     setFormSuccess(true);
     setTitle('');
     setDescription('');
     setPhotoAttached(false);
+    setPhotoDataUrl(null);
+    setPhotoName('');
     setTimeout(() => setFormSuccess(false), 4000);
   };
 
@@ -125,6 +169,7 @@ export default function FieldReports() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
+              if (!requireAuthAction('Toggle Live Sync')) return;
               if (!isOnline) {
                 setIsOnline(true);
                 window.location.reload();
@@ -135,7 +180,7 @@ export default function FieldReports() {
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
               isOnline
                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                : 'bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/30'
             }`}
           >
             {isOnline ? <Wifi size={14} /> : <WifiOff size={14} />}
@@ -143,7 +188,10 @@ export default function FieldReports() {
           </button>
 
           <button
-            onClick={syncPendingReports}
+            onClick={() => {
+              if (!requireAuthAction('Sync Queue')) return;
+              syncPendingReports();
+            }}
             disabled={isSyncing || !isOnline}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/25 transition-all disabled:opacity-50"
           >
@@ -153,7 +201,71 @@ export default function FieldReports() {
         </div>
       </div>
 
+      <RoleGate roles={['control_room', 'admin']}>
+      {/* Review Workflow Status — Pending → Reviewed → Resolved (Objective 5) */}
+      <div className="p-4 rounded-xl glass-panel bg-[hsl(var(--card))] border border-[hsl(var(--border))]">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+          <div className="flex items-center gap-2">
+            <FileText size={14} className="text-indigo-400" />
+            <h3 className="text-sm font-bold text-[hsl(var(--foreground))]">Review Workflow Status</h3>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 ${
+                serverConnected
+                  ? 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/40'
+                  : 'text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/40'
+              }`}
+            >
+              Backend: {serverConnected ? 'Connected' : 'Offline'}
+            </span>
+            <span className="text-[10px] text-[hsl(var(--muted-foreground))] font-mono">
+              Reports requiring review: <strong className="text-amber-700 dark:text-amber-400">{pendingReports.length}</strong>
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2">
+          <div className="p-3 rounded-lg bg-indigo-950/30 border border-indigo-500/30">
+            <span className="text-[10px] uppercase font-mono text-left block">1 · Pending Review</span>
+            <p className="text-2xl font-black text-[hsl(var(--foreground))] mt-1">{pendingReports.length}</p>
+            <span className="text-[11px] text-amber-700 dark:text-amber-400 font-semibold">{pendingCount} awaiting sync</span>
+          </div>
+          <div className="p-3 rounded-lg bg-emerald-950/20 border border-emerald-500/30">
+            <span className="text-[10px] uppercase font-mono text-left block">2 · Reviewed / Verified</span>
+            <p className="text-2xl font-black text-[hsl(var(--foreground))] mt-1">{reviewedReports.length}</p>
+            <span className="text-[11px] text-emerald-400 font-semibold">Action dispatched</span>
+          </div>
+          <div className="p-3 rounded-lg bg-blue-950/20 border border-blue-500/30">
+            <span className="text-[10px] uppercase font-mono text-left block">3 · Resolved</span>
+            <p className="text-2xl font-black text-[hsl(var(--foreground))] mt-1">{resolvedReports.length}</p>
+            <span className="text-[11px] text-blue-400 font-semibold">Corridor restored</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Sync History — Item 5 */}
+      {syncHistory.length > 0 && (
+        <div className="p-4 rounded-xl glass-panel bg-[hsl(var(--card))] border border-[hsl(var(--border))]">
+          <div className="flex items-center gap-2 mb-2">
+            <Clock size={14} className="text-slate-500" />
+            <h3 className="text-sm font-bold text-[hsl(var(--foreground))]">Sync History</h3>
+            <span className="text-[10px] font-mono text-[hsl(var(--muted-foreground))]">({syncHistory.length} event(s))</span>
+          </div>
+          <div className="max-h-36 overflow-y-auto space-y-1">
+            {[...syncHistory].reverse().slice(0, 15).map((e, i) => (
+              <div key={i} className="text-[10px] font-mono text-slate-600 flex items-start gap-2">
+                <span className="shrink-0 text-slate-400">{new Date(e.timestamp).toLocaleTimeString()}</span>
+                <span className="text-slate-700">{e.detail}</span>
+              </div>
+))}
+          </div>
+        </div>
+      )}
+      </RoleGate>
+
       {/* Main Grid: Form + Feed */}
+      <RoleGate roles={['control_room', 'field_officer']}>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Form: Field Officer Upload (1 Col) */}
         <div className="p-5 rounded-xl glass-panel bg-[hsl(var(--card))] border border-[hsl(var(--border))] space-y-4">
@@ -213,7 +325,7 @@ export default function FieldReports() {
                     Verified
                   </span>
                 ) : (
-                  <span className="text-[10px] text-amber-400 font-medium flex-shrink-0">Verification Recommended</span>
+                  <span className="text-[10px] text-amber-700 dark:text-amber-400 font-medium flex-shrink-0">Verification Recommended</span>
                 )}
               </div>
 
@@ -396,19 +508,35 @@ export default function FieldReports() {
               />
             </div>
 
-            {/* Photo Attachment Toggle */}
-            <div
-              onClick={() => setPhotoAttached(!photoAttached)}
-              className={`p-3 rounded-lg border border-dashed cursor-pointer flex items-center justify-center gap-2 transition-all ${
-                photoAttached
-                  ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400'
-                  : 'border-[hsl(var(--border))] hover:border-blue-500/50 text-[hsl(var(--muted-foreground))]'
-              }`}
-            >
-              <Camera size={16} />
-              <span className="font-semibold text-xs">
-                {photoAttached ? '✓ Geo-Tagged Photo Attached (IMG_NER_2026.jpg)' : '+ Attach Photo from Camera'}
-              </span>
+{/* Photo Capture — real camera */}
+            <div className="space-y-2">
+              <label className="font-bold text-[hsl(var(--foreground))] block">
+                Camera Capture <span className="text-[hsl(var(--muted-foreground))]">(geo-tagged)</span>
+              </label>
+              <label
+                className={`p-3 rounded-lg border border-dashed cursor-pointer flex items-center justify-center gap-2 transition-all ${
+                  photoAttached
+                    ? 'border-emerald-500 bg-emerald-500/10 text-emerald-400'
+                    : 'border-[hsl(var(--border))] hover:border-blue-500/50 text-[hsl(var(--muted-foreground))]'
+                }`}
+              >
+                <Camera size={16} />
+                <span className="font-semibold text-xs">
+                  {photoAttached ? `Attached: ${photoName || 'photo.jpg'}` : 'Open Camera / Choose Photo'}
+                </span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={handlePhotoSelect}
+                />
+              </label>
+              {photoDataUrl && (
+                <div className="mt-2 border border-[hsl(var(--border))] rounded overflow-hidden max-h-40">
+                  <img src={photoDataUrl} alt="Preview" className="w-full h-full object-cover" />
+                </div>
+              )}
             </div>
 
             <button
@@ -454,7 +582,7 @@ export default function FieldReports() {
                       className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
                         rep.syncStatus === 'synced'
                           ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                          : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+: 'bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-500/30'
                       }`}
                     >
                       {rep.syncStatus.toUpperCase()}
@@ -465,11 +593,25 @@ export default function FieldReports() {
                 <p className="text-xs text-slate-700 leading-relaxed">{rep.description}</p>
 
                 <div className="flex items-center justify-between gap-2 text-[11px] pt-2 border-t border-[hsl(var(--border))]/50 font-mono flex-wrap">
+                  <DataProvenance
+                    source="FIELD REPORT"
+                    basis={rep.photoAttached ? 'camera + GPS geo-tag captured on device' : 'GPS geo-tag captured on device'}
+                    updatedBy={rep.officerName}
+                    updatedAt={rep.updatedAt ?? rep.timestamp}
+                  />
                   <span className="text-slate-600 break-all">
                     GPS: {rep.lat.toFixed(4)}°N, {rep.lng.toFixed(4)}°E
+                    {rep.attempts != null && rep.attempts > 0 && (
+                      <span className="text-amber-500 ml-2">({rep.attempts} sync attempt(s))</span>
+                    )}
                   </span>
-                  <span className="text-slate-600 flex-shrink-0">{rep.timestamp}</span>
                 </div>
+
+                {rep.photoDataUrl && (
+                  <div className="border border-[hsl(var(--border))] rounded overflow-hidden max-h-28">
+                    <img src={rep.photoDataUrl} alt={`Photo for ${rep.id}`} className="w-full h-full object-cover" />
+                  </div>
+                )}
 
                 {rep.actionNote && (
                   <div
@@ -479,11 +621,47 @@ export default function FieldReports() {
                     <strong>Action Taken:</strong> {rep.actionNote}
                   </div>
                 )}
+
+                {/* Reviewer Actions — advance status through workflow (Objective 5) */}
+                {rep.status !== 'resolved' && (
+                  <div className="flex items-center gap-2 pt-2 border-t border-[hsl(var(--border))]/50">
+                    {rep.status === 'submitted' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                      if (!requireAuthAction('Verify Field Report')) return;
+                      reviewReport(rep.id, 'Verified by district control — response team dispatched.');
+                    }}
+                        className="px-2.5 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 text-[11px] font-bold border border-emerald-500/30 flex items-center gap-1"
+                      >
+                        <ShieldCheck size={11} />
+                        Review &amp; Verify
+                      </button>
+                    )}
+                    {rep.status !== 'submitted' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                        if (!requireAuthAction('Resolve Field Report')) return;
+                        resolveReport(rep.id, 'Issue resolved — corridor restored to full service.');
+                      }}
+                        className="px-2.5 py-1 rounded bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 text-[11px] font-bold border border-blue-500/30 flex items-center gap-1"
+                      >
+                        <CheckCircle2 size={11} />
+                        Resolve Report
+                      </button>
+                    )}
+                    <span className="text-[10px] text-[hsl(var(--muted-foreground))] font-mono">
+                      Workflow: {rep.status === 'submitted' ? '1/3 Review' : '2/3 Verify'}
+                    </span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
         </div>
       </div>
+      </RoleGate>
     </div>
   );
 }

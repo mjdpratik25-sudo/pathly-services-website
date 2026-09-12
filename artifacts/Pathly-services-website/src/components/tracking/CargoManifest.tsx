@@ -16,12 +16,15 @@ import {
   X,
   AlertTriangle,
   Smartphone,
-  Check
+  Check,
+  Crosshair
 } from 'lucide-react';
 import { type Vehicle, getCargoIcon } from '../../data/nerData';
 import StatusBadge from '../common/StatusBadge';
 import { dispatchDriverSms } from '../../lib/smsService';
 import { lockScroll, unlockScroll } from '../../lib/scrollLock';
+import { syncPlace, ensurePlace, type PlaceDescriptor } from '../../lib/placeNames';
+import { requireAuthAction } from '../../lib/authGate';
 
 interface CargoManifestProps {
   vehicle: Vehicle | null;
@@ -31,6 +34,22 @@ interface CargoManifestProps {
 
 export default function CargoManifest({ vehicle, onClose, onReroute }: CargoManifestProps) {
   const [smsSent, setSmsSent] = React.useState(false);
+  const [nearPlace, setNearPlace] = React.useState<PlaceDescriptor | null>(null);
+
+  // Reverse-geocoded place name beside the GPS coordinates — matches the
+  // map popup so both panels always show the same "Near:" location.
+  React.useEffect(() => {
+    if (!vehicle) return;
+    const { currentLat, currentLng } = vehicle;
+    setNearPlace(syncPlace(currentLat, currentLng));
+    let active = true;
+    ensurePlace(currentLat, currentLng).then((up) => {
+      if (active) setNearPlace(up);
+    });
+    return () => {
+      active = false;
+    };
+  }, [vehicle?.currentLat, vehicle?.currentLng]);
 
   // Lock background scroll while the cargo drawer is open (shared with other overlays)
   React.useEffect(() => {
@@ -81,11 +100,11 @@ export default function CargoManifest({ vehicle, onClose, onReroute }: CargoMani
         <div className="p-4 space-y-4 flex-1">
           {/* Status Alert if delayed */}
           {vehicle.status === 'delayed' && (
-            <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs flex items-start gap-2">
+            <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 text-amber-700 dark:text-amber-400 text-xs flex items-start gap-2">
               <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
               <div>
                 <p className="font-bold">Vehicle Delayed on Route</p>
-                <p className="text-[11px] text-amber-300/80 mt-0.5">
+                <p className="text-[11px] text-amber-800 dark:text-amber-300/80 mt-0.5">
                   Transit speed reduced due to heavy rains/debris on {vehicle.route}. Estimated delay: +45 minutes.
                 </p>
               </div>
@@ -160,6 +179,24 @@ export default function CargoManifest({ vehicle, onClose, onReroute }: CargoMani
               </span>
             </div>
             <div className="flex items-center justify-between text-xs">
+              <span className="text-[hsl(var(--muted-foreground))]">Near:</span>
+              <span className="font-mono text-[11px] text-emerald-400/90 text-right">
+                {nearPlace ? nearPlace.formatted : 'Resolving nearest place…'}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (!requireAuthAction('View Exact Location on Map')) return;
+                window.dispatchEvent(new CustomEvent('pathly_navigate_vehicle', { detail: vehicle }));
+                onClose();
+              }}
+              className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-lg shadow-emerald-600/20"
+            >
+              <Crosshair size={13} />
+              <span>View Exact Location on Map</span>
+            </button>
+            <div className="flex items-center justify-between text-xs">
               <span className="text-[hsl(var(--muted-foreground))]">Current Speed:</span>
               <span className="font-mono font-bold text-blue-400">{vehicle.speed} km/h</span>
             </div>
@@ -169,7 +206,10 @@ export default function CargoManifest({ vehicle, onClose, onReroute }: CargoMani
         {/* Footer Actions */}
         <div className="p-4 border-t border-[hsl(var(--border))] flex items-center gap-2 sticky bottom-0 bg-[hsl(var(--card))] flex-wrap">
           <button
-            onClick={() => onReroute?.(vehicle)}
+            onClick={() => {
+              if (!requireAuthAction('Alternate Corridor')) return;
+              onReroute?.(vehicle);
+            }}
             className="flex-1 py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-lg shadow-blue-600/20 whitespace-nowrap"
           >
             <Navigation size={14} />
@@ -177,6 +217,7 @@ export default function CargoManifest({ vehicle, onClose, onReroute }: CargoMani
           </button>
           <button
             onClick={async () => {
+              if (!requireAuthAction('SMS Driver')) return;
               setSmsSent(true);
               await dispatchDriverSms({
                 recipientPhone: vehicle.driverPhone,

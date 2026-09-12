@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { useLocation } from 'wouter';
 import { type OfficerProfile, DEFAULT_OFFICER } from '../auth/OfficerAuthModal';
-import { sendFast2SmsOtp } from '../../lib/smsService';
+
 import { useUserLocation } from '../../hooks/useUserLocation';
 
 interface OfficerProfileDrawerProps {
@@ -66,12 +66,15 @@ export default function OfficerProfileDrawer({
 
   const jurisdiction = detectedLocation || `${currentOfficer.state} & Region`;
 
-  const handleTestBroadcast = async () => {
+  const handleTestBroadcast = () => {
     setSmsSending(true);
-    const res = await sendFast2SmsOtp(currentOfficer.phone);
-    setSmsSending(false);
-    setSmsSentNotice(`SMS broadcast dispatched to account phone (OTP: ${res.otp || 'SENT'})`);
-    setTimeout(() => setSmsSentNotice(null), 4000);
+    window.setTimeout(() => {
+      setSmsSending(false);
+      setSmsSentNotice(
+        `SIMULATED DISPATCH — Fast2SMS provider not connected · Test message logged locally · ${new Date().toLocaleTimeString('en-IN')}`
+      );
+      window.setTimeout(() => setSmsSentNotice(null), 6000);
+    }, 700);
   };
 
   // Rows shared across the flat stats sections

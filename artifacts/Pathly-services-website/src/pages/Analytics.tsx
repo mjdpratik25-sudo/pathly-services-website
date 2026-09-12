@@ -2,7 +2,7 @@
 // Analytics: Logistics Bottlenecks & Connectivity Intelligence
 // ============================================================
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { 
   BarChart, 
   Bar, 
@@ -33,9 +33,11 @@ import {
 import { 
   NER_STATES, 
   NER_DISTRICTS, 
+  ROAD_SEGMENTS, 
   SUPPLY_CHAIN_METRICS, 
   PLATFORM_STATS 
 } from '../data/nerData';
+import { requireAuthAction } from '../lib/authGate';
 
 const STATE_CONNECTIVITY_DATA = [
   { state: 'Assam', score: 79, vehicles: 120, delays: 12 },
@@ -66,7 +68,47 @@ const MONTHLY_TRENDS = [
   { month: 'Oct', rainfall: 95, delayHours: 2.8, onTimeRate: 85 }
 ];
 
+// Item 11 — seeded benchmark baseline (pre-Pathly).
+// Each value is the known reference against which the live calculation is compared.
+const BENCHMARKS = {
+  avgDelayHours: 5.1,            // pre-Pathly regional average
+  deliverySuccessPct: 80.0,      // government hill-sector target
+  landslideSharePct: 18,         // national landslide disruption share
+  officersPerDistrict: 1.2,      // coverage target
+};
+
+function computeKPIs() {
+  // Avg Transit Delay — mean of segment delayMinutes, converted to hours.
+  const segDelayTotal = ROAD_SEGMENTS.reduce((sum, s) => sum + (s.delayMinutes ?? 0), 0);
+  const avgDelayHours = Math.round((segDelayTotal / ROAD_SEGMENTS.length / 60) * 10) / 10;
+
+  // Delivery Success — weighted mean of commodity on-time rates (weighted by commodity volume proxy: inTransit count).
+  const totalWeight = SUPPLY_CHAIN_METRICS.reduce((s, c) => s + c.inTransit, 0);
+  const deliverySuccessPct =
+    totalWeight > 0
+      ? Math.round(
+          SUPPLY_CHAIN_METRICS.reduce((s, c) => s + (c.onTimeRate * c.inTransit) / totalWeight, 0) * 10
+        ) / 10
+      : 0;
+
+  // Landslide share — landslide disruption events as % of all disruption causes.
+  const totalDisruptions = DISRUPTION_CAUSES.reduce((s, c) => s + c.value, 0);
+  const landslidePct =
+    totalDisruptions > 0
+      ? Math.round((DISRUPTION_CAUSES.find((c) => c.name.startsWith('Landslide'))?.value ?? 0) / totalDisruptions * 100)
+      : 0;
+
+  // Field Inspector Coverage — officers per monitored district.
+  const officersPerDistrict =
+    NER_DISTRICTS.length > 0
+      ? Math.round((PLATFORM_STATS.fieldOfficers / NER_DISTRICTS.length) * 100) / 100
+      : 0;
+
+  return { avgDelayHours, deliverySuccessPct, landslidePct, officersPerDistrict };
+}
+
 export default function Analytics() {
+  const kpis = useMemo(computeKPIs, []);
   return (
     <div className="space-y-6 animate-fade-in pb-12">
       {/* Header */}
@@ -87,7 +129,10 @@ export default function Analytics() {
         </div>
 
         <button
-          onClick={() => alert('Generating Executive PDF Intelligence Report for Pathly Regional Command...')}
+          onClick={() => {
+            if (!requireAuthAction('Export Regional Report')) return;
+            alert('Generating Executive PDF Intelligence Report for Pathly Regional Command...');
+          }}
           className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/30 transition-all self-start md:self-auto"
         >
           <Download size={15} />
@@ -95,33 +140,106 @@ export default function Analytics() {
         </button>
       </div>
 
-      {/* Top High-level KPIs */}
+      {/* Top High-level KPIs — calculated from real fixtures + inline method annotation */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="p-4 rounded-xl glass-card bg-[hsl(var(--card))] border border-[hsl(var(--border))]">
           <p className="text-xs text-[hsl(var(--muted-foreground))] font-semibold uppercase">Avg Transit Delay</p>
-          <h3 className="metric-value text-blue-400 mt-1">4.2 Hours</h3>
+          <h3 className="metric-value text-blue-400 mt-1">{kpis.avgDelayHours} Hours</h3>
           <p className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1">
             <TrendingDown size={13} />
-            <span>18% faster via Dynamic Rerouting</span>
+            <span>{Math.round((1 - kpis.avgDelayHours / BENCHMARKS.avgDelayHours) * 100)}% faster via dynamic rerouting</span>
+          </p>
+          <p className="text-[9px] text-slate-500 mt-1 font-mono leading-tight">
+            = Σ(segment delay min) ÷ segments ÷ 60
           </p>
         </div>
 
         <div className="p-4 rounded-xl glass-card bg-[hsl(var(--card))] border border-[hsl(var(--border))]">
           <p className="text-xs text-[hsl(var(--muted-foreground))] font-semibold uppercase">Delivery Success Quota</p>
-          <h3 className="metric-value text-emerald-400 mt-1">76.4%</h3>
-          <p className="text-[11px] text-slate-400 mt-1">Target: &gt; 80% for hill sectors</p>
+          <h3 className="metric-value text-emerald-400 mt-1">{kpis.deliverySuccessPct}%</h3>
+          <p className="text-[11px] mt-1 flex items-center gap-1" style={{ color: kpis.deliverySuccessPct >= BENCHMARKS.deliverySuccessPct ? '#34d399' : '#f87171' }}>
+            {kpis.deliverySuccessPct >= BENCHMARKS.deliverySuccessPct ? <TrendingDown size={13} /> : <TrendingUp size={13} />}
+            <span>{Math.abs(Math.round((kpis.deliverySuccessPct - BENCHMARKS.deliverySuccessPct) * 10) / 10)}pp {kpis.deliverySuccessPct >= BENCHMARKS.deliverySuccessPct ? 'above' : 'below'} hill-sector target</span>
+          </p>
+          <p className="text-[9px] text-slate-500 mt-1 font-mono leading-tight">
+            = Σ(commodity on-time% × volume) ÷ total volume
+          </p>
         </div>
 
         <div className="p-4 rounded-xl glass-card bg-[hsl(var(--card))] border border-[hsl(var(--border))]">
-          <p className="text-xs text-[hsl(var(--muted-foreground))] font-semibold uppercase">Landslide Bottlenecks</p>
-          <h3 className="metric-value text-rose-400 mt-1">42%</h3>
-          <p className="text-[11px] text-rose-400 mt-1">Leading cause of delay in region</p>
+          <p className="text-xs text-[hsl(var(--muted-foreground))] font-semibold uppercase">Landslide Disruption Share</p>
+          <h3 className="metric-value text-rose-400 mt-1">{kpis.landslidePct}%</h3>
+          <p className="text-[11px] text-rose-400 mt-1">+{Math.max(0, kpis.landslidePct - BENCHMARKS.landslideSharePct)}pp vs national baseline ({BENCHMARKS.landslideSharePct}%)</p>
+          <p className="text-[9px] text-slate-500 mt-1 font-mono leading-tight">
+            = landslide disruption events ÷ total events × 100
+          </p>
         </div>
 
         <div className="p-4 rounded-xl glass-card bg-[hsl(var(--card))] border border-[hsl(var(--border))]">
           <p className="text-xs text-[hsl(var(--muted-foreground))] font-semibold uppercase">Active Field Inspectors</p>
-          <h3 className="metric-value text-purple-400 mt-1">245 Officers</h3>
-          <p className="text-[11px] text-slate-400 mt-1">Deployed across 80 districts</p>
+          <h3 className="metric-value text-purple-400 mt-1">{PLATFORM_STATS.fieldOfficers} Officers</h3>
+          <p className="text-[11px] text-slate-400 mt-1">{kpis.officersPerDistrict} officers / district · {NER_DISTRICTS.length} monitored</p>
+          <p className="text-[9px] text-slate-500 mt-1 font-mono leading-tight">
+            = deployed officers ÷ monitored districts
+          </p>
+        </div>
+      </div>
+
+      {/* Item 11 — transparent calculation method & benchmark reference */}
+      <div className="p-4 rounded-xl glass-panel bg-[hsl(var(--card))] border border-[hsl(var(--border))]">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+          <div>
+            <h3 className="text-sm font-bold text-[hsl(var(--foreground))]">How These Metrics Are Calculated</h3>
+            <p className="text-[11px] text-[hsl(var(--muted-foreground))]">Each indicator is computed from the fixtures above — not hard-coded. Benchmarks are seeded baselines for comparison.</p>
+          </div>
+          <span className="text-[9px] font-bold uppercase tracking-wider text-[hsl(var(--muted-foreground))] border border-[hsl(var(--border))] px-2 py-1 bg-[hsl(var(--secondary))]">
+            Transparency
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse min-w-[640px]">
+            <thead>
+              <tr className="text-[10px] uppercase tracking-wider text-[hsl(var(--muted-foreground))] border-b border-[hsl(var(--border))]">
+                <th className="py-2 pr-3 font-bold">Indicator</th>
+                <th className="py-2 pr-3 font-bold">Live Value</th>
+                <th className="py-2 pr-3 font-bold">Calculation Method</th>
+                <th className="py-2 pr-3 font-bold">Benchmark</th>
+                <th className="py-2 font-bold">Gap</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-b border-[hsl(var(--border))]">
+                <td className="py-2 pr-3 font-semibold text-[hsl(var(--foreground))]">Avg Transit Delay</td>
+                <td className="py-2 pr-3 font-mono">{kpis.avgDelayHours}h</td>
+                <td className="py-2 pr-3 text-[hsl(var(--muted-foreground))]">Σ(delayMinutes across all segments) ÷ segment count ÷ 60</td>
+                <td className="py-2 pr-3 font-mono">{BENCHMARKS.avgDelayHours}h (pre-Pathly)</td>
+                <td className="py-2 font-mono text-emerald-400">{Math.round((1 - kpis.avgDelayHours / BENCHMARKS.avgDelayHours) * 100)}% faster</td>
+              </tr>
+              <tr className="border-b border-[hsl(var(--border))]">
+                <td className="py-2 pr-3 font-semibold text-[hsl(var(--foreground))]">Delivery Success</td>
+                <td className="py-2 pr-3 font-mono">{kpis.deliverySuccessPct}%</td>
+                <td className="py-2 pr-3 text-[hsl(var(--muted-foreground))]">Weighted mean of per-commodity on-time rate (weight = inTransit count)</td>
+                <td className="py-2 pr-3 font-mono">{BENCHMARKS.deliverySuccessPct}% (hill-sector target)</td>
+                <td className="py-2 font-mono" style={{ color: kpis.deliverySuccessPct >= BENCHMARKS.deliverySuccessPct ? '#34d399' : '#f87171' }}>
+                  {Math.abs(Math.round((kpis.deliverySuccessPct - BENCHMARKS.deliverySuccessPct) * 10) / 10)}pp
+                </td>
+              </tr>
+              <tr className="border-b border-[hsl(var(--border))]">
+                <td className="py-2 pr-3 font-semibold text-[hsl(var(--foreground))]">Landslide Share</td>
+                <td className="py-2 pr-3 font-mono">{kpis.landslidePct}%</td>
+                <td className="py-2 pr-3 text-[hsl(var(--muted-foreground))]">Landslide disruption events ÷ total disruption events × 100</td>
+                <td className="py-2 pr-3 font-mono">{BENCHMARKS.landslideSharePct}% (national avg)</td>
+                <td className="py-2 font-mono text-rose-400">+{Math.max(0, kpis.landslidePct - BENCHMARKS.landslideSharePct)}pp above baseline</td>
+              </tr>
+              <tr>
+                <td className="py-2 pr-3 font-semibold text-[hsl(var(--foreground))]">Inspector Coverage</td>
+                <td className="py-2 pr-3 font-mono">{kpis.officersPerDistrict} / district</td>
+                <td className="py-2 pr-3 text-[hsl(var(--muted-foreground))]">Deployed officers ÷ monitored districts</td>
+                <td className="py-2 pr-3 font-mono">{BENCHMARKS.officersPerDistrict} / district (target)</td>
+                <td className="py-2 font-mono text-amber-700 dark:text-amber-400">{kpis.officersPerDistrict >= BENCHMARKS.officersPerDistrict ? 'At target' : 'Below target'}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 

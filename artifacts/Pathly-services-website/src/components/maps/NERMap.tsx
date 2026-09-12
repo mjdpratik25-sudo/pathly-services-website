@@ -27,7 +27,6 @@ import {
 } from 'lucide-react';
 import {
   NER_DISTRICTS,
-  ROAD_SEGMENTS,
   GIS_INFRASTRUCTURE,
   type Vehicle,
   type LogisticsAlert,
@@ -39,9 +38,11 @@ import {
   getRoadStatusColor,
   getTrafficColor,
 } from '../../data/nerData';
+import { getRoadSegments, useScenario } from '../../lib/scenarioEngine';
 import { geocodeAddress, reverseGeocode, searchSuggestions, type GeocodingResult } from '../../lib/geocodeService';
 import { sendFast2SmsOtp } from '../../lib/smsService';
 import { lockScroll, unlockScroll } from '../../lib/scrollLock';
+import { requireAuthAction } from '../../lib/authGate';
 
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '';
 
@@ -97,6 +98,9 @@ export default function NERMap({
   centerPos = [26.1445, 91.7362],
   stateFilter = 'ALL',
 }: NERMapProps) {
+  // Subscribe to the scenario engine so DRILL FEED segment states render live.
+  useScenario();
+
   const mapRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const googleMapInstance = useRef<any>(null);
@@ -556,7 +560,7 @@ export default function NERMap({
 
       // A. Road Polylines
       if (roadsEnabled) {
-        ROAD_SEGMENTS.forEach((road) => {
+        getRoadSegments().forEach((road) => {
           const roadColor = trafficEnabled ? getTrafficColor(road.trafficCongestion) : getRoadStatusColor(road.status);
           const isBlocked = road.status === 'blocked';
           const isSelected = selectedRoad?.id === road.id;
@@ -868,7 +872,7 @@ export default function NERMap({
             >
               <span>🛣️ Roads</span>
               <span className={`text-[10px] px-1 rounded font-mono ${roadsEnabled ? 'bg-blue-700 text-white' : 'bg-slate-200 text-slate-700'}`}>
-                ({ROAD_SEGMENTS.length})
+                ({getRoadSegments().length})
               </span>
             </button>
 
@@ -943,6 +947,7 @@ export default function NERMap({
               <button
                 type="button"
                 onClick={() => {
+                  if (!requireAuthAction('Track Orders')) return;
                   setShowOrderPresets((prev) => !prev);
                   setShowSearchPresets(false);
                 }}

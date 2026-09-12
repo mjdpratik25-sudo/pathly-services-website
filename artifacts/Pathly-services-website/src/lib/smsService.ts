@@ -308,6 +308,18 @@ export async function dispatchDriverSms(payload: SmsDispatchPayload): Promise<Sm
   if (provider === 'fast2sms') {
     const apiKey = getFast2SmsKey();
 
+    if (!apiKey) {
+      // No key → local queue (OTP generated in-region)
+      return {
+        success: true,
+        message: `[Fast2SMS key not configured] SMS queued for +91-${cleanPhone}. Configure the Fast2SMS DLT gateway in Settings for carrier delivery.`,
+        messageId: `SIM_F2S_${Date.now()}`,
+        previewText: text,
+        provider: 'fast2sms',
+        dispatchedAt: new Date().toLocaleTimeString('en-IN')
+      };
+    }
+
     try {
       const response = await fetch('https://www.fast2sms.com/dev/bulkV2', {
         method: 'POST',
@@ -360,7 +372,7 @@ export async function dispatchDriverSms(payload: SmsDispatchPayload): Promise<Sm
   if (!twilio.accountSid || !twilio.authToken) {
     return {
       success: true,
-      message: `[Simulated Sandbox Mode] Twilio SMS queued for +91-${cleanPhone}. Add Account SID & Token in Settings.`,
+      message: `[Twilio credentials not configured] SMS queued for +91-${cleanPhone}. Add Account SID & Token in Settings.`,
       messageId: `TW_${Date.now()}_${Math.random().toString(36).substring(2, 7).toUpperCase()}`,
       previewText: text,
       provider: 'twilio',

@@ -24,8 +24,26 @@ import GoogleNERMap from '../components/maps/GoogleNERMap';
 import TacticalNERMap from '../components/maps/TacticalNERMap';
 import StatusBadge from '../components/common/StatusBadge';
 import CargoManifest from '../components/tracking/CargoManifest';
+import DataProvenance from '../components/common/DataProvenance';
 import { useVehicleTracking } from '../hooks/useVehicleTracking';
-import { type CargoType, type Vehicle, getCargoIcon } from '../data/nerData';
+import { type CargoType, type Vehicle, gpsSourceLabel, type GpsSource, getCargoIcon } from '../data/nerData';
+import { requireAuthAction } from '../lib/authGate';
+
+const SOURCE_TAG_STYLE: Record<GpsSource, string> = {
+  simulator: 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-500/10 border-amber-300 dark:border-amber-500/30',
+  driver_mobile: 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-500/10 border-emerald-300 dark:border-emerald-500/30',
+  real: 'text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-500/10 border-sky-300 dark:border-sky-500/30',
+};
+
+function SourceTag({ source }: { source?: GpsSource }) {
+  const label = gpsSourceLabel(source);
+  const style = SOURCE_TAG_STYLE[source ?? 'simulator'];
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[8px] font-mono font-bold uppercase tracking-wide ${style}`}>
+      {label}
+    </span>
+  );
+}
 
 export default function VehicleTracking({ isSidebarOpen = true }: { isSidebarOpen?: boolean }) {
   const { 
@@ -34,13 +52,25 @@ export default function VehicleTracking({ isSidebarOpen = true }: { isSidebarOpe
     setSelectedVehicle, 
     activeVehicles, 
     delayedVehicles, 
-    emergencyVehicles 
+    emergencyVehicles,
+    serverOnline
   } = useVehicleTracking();
 
   const [cargoFilter, setCargoFilter] = useState<CargoType | 'ALL'>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'in_transit' | 'delayed' | 'stopped'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [mapEngine, setMapEngine] = useState<'google' | 'tactical'>('google');
+
+  // Guest view-only: opening an order's detail/action panel requires sign-in.
+  const handleSelectVehicle = (v: Vehicle) => {
+    if (!requireAuthAction('Track Orders')) return;
+    setSelectedVehicle(v);
+  };
+
+  const handleSetCargoFilter = (f: CargoType | 'ALL') => {
+    if (!requireAuthAction('Filter Fleet')) return;
+    setCargoFilter(f);
+  };
 
   // Parse URL search parameters (e.g. ?vehicle=NER-V003 or ?search=ORD-TR-7821)
   React.useEffect(() => {
@@ -104,6 +134,14 @@ export default function VehicleTracking({ isSidebarOpen = true }: { isSidebarOpe
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             Live positioning of trucks, mini-trucks, and medical refrigeration vans carrying life-saving supplies across remote districts.
           </p>
+          <div className="mt-1.5">
+            <DataProvenance
+              source={serverOnline ? 'LIVE API' : 'STANDBY'}
+              basis={serverOnline ? 'real GPS telemetry pipeline (device pings persisted server-side)' : 'no live GPS uplink configured — position cache in standby'}
+              updatedBy="Telemetry Service"
+              updatedAt="5s refresh cadence"
+            />
+          </div>
         </div>
 
         {/* Quick KPI pills */}
@@ -143,7 +181,7 @@ export default function VehicleTracking({ isSidebarOpen = true }: { isSidebarOpe
               style={{ WebkitOverflowScrolling: 'touch' }}
             >
               <button
-                onClick={() => setCargoFilter('ALL')}
+                onClick={() => handleSetCargoFilter('ALL')}
                 className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition-all cursor-pointer shadow-xs ${
                   cargoFilter === 'ALL'
                     ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25 ring-1 ring-blue-400/20'
@@ -153,7 +191,7 @@ export default function VehicleTracking({ isSidebarOpen = true }: { isSidebarOpe
                 All Fleet
               </button>
               <button
-                onClick={() => setCargoFilter('medicines')}
+                onClick={() => handleSetCargoFilter('medicines')}
                 className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition-all cursor-pointer shadow-xs ${
                   cargoFilter === 'medicines'
                     ? 'bg-gradient-to-r from-rose-500 to-red-600 text-white shadow-md shadow-rose-500/25 ring-1 ring-rose-400/20'
@@ -163,7 +201,7 @@ export default function VehicleTracking({ isSidebarOpen = true }: { isSidebarOpe
                 💊 Medicines
               </button>
               <button
-                onClick={() => setCargoFilter('food_supplies')}
+                onClick={() => handleSetCargoFilter('food_supplies')}
                 className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition-all cursor-pointer shadow-xs ${
                   cargoFilter === 'food_supplies'
                     ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-md shadow-amber-500/25 ring-1 ring-amber-400/20'
@@ -173,7 +211,7 @@ export default function VehicleTracking({ isSidebarOpen = true }: { isSidebarOpe
                 🍚 Food
               </button>
               <button
-                onClick={() => setCargoFilter('agricultural')}
+                onClick={() => handleSetCargoFilter('agricultural')}
                 className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition-all cursor-pointer shadow-xs ${
                   cargoFilter === 'agricultural'
                     ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md shadow-emerald-500/25 ring-1 ring-emerald-400/20'
@@ -183,7 +221,7 @@ export default function VehicleTracking({ isSidebarOpen = true }: { isSidebarOpe
                 🌾 Agri
               </button>
               <button
-                onClick={() => setCargoFilter('construction')}
+                onClick={() => handleSetCargoFilter('construction')}
                 className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition-all cursor-pointer shadow-xs ${
                   cargoFilter === 'construction'
                     ? 'bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-md shadow-purple-500/25 ring-1 ring-purple-400/20'
@@ -203,7 +241,7 @@ export default function VehicleTracking({ isSidebarOpen = true }: { isSidebarOpe
               return (
                 <div
                   key={v.id}
-                  onClick={() => setSelectedVehicle(v)}
+                  onClick={() => handleSelectVehicle(v)}
                   className={`p-3.5 rounded-xl cursor-pointer border transition-all ${
                     isSelected
                       ? 'border-blue-500 bg-gradient-to-br from-blue-50/90 to-indigo-50/40 dark:bg-blue-950/20 shadow-lg shadow-blue-500/10 ring-2 ring-blue-400/20'
@@ -223,6 +261,7 @@ export default function VehicleTracking({ isSidebarOpen = true }: { isSidebarOpe
                           )}
                         </div>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 break-words">{v.driverName} • {v.origin} ➔ {v.destination}</p>
+                        <div className="mt-1"><SourceTag source={v.source} /></div>
                       </div>
                     </div>
                     <StatusBadge type="vehicle" value={v.status} />
@@ -232,7 +271,7 @@ export default function VehicleTracking({ isSidebarOpen = true }: { isSidebarOpe
                   <div className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
                     <div className="flex justify-between gap-2 text-[11px] font-mono flex-wrap">
                       <span className="text-slate-500 dark:text-slate-400">Progress: {v.progress}%</span>
-                      <span className="text-blue-600 dark:text-blue-400 font-bold">{v.speed} km/h • ETA: {v.eta}</span>
+                      <span className="text-blue-600 dark:text-blue-400 font-bold">{v.speed} km/h • ETA: {v.eta}{v.distanceTripKm !== undefined ? ` • ${v.distanceTripKm} km trip` : ''}</span>
                     </div>
                     <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                       <div
@@ -284,7 +323,7 @@ export default function VehicleTracking({ isSidebarOpen = true }: { isSidebarOpe
             <GoogleNERMap
               vehicles={vehicles}
               selectedVehicle={selectedVehicle}
-              onSelectVehicle={(v) => setSelectedVehicle(v)}
+              onSelectVehicle={(v: Vehicle) => handleSelectVehicle(v)}
               showRoads={true}
               showVehicles={true}
               showAlerts={true}
@@ -295,7 +334,7 @@ export default function VehicleTracking({ isSidebarOpen = true }: { isSidebarOpe
             <TacticalNERMap
               vehicles={vehicles}
               selectedVehicle={selectedVehicle}
-              onSelectVehicle={(v: Vehicle) => setSelectedVehicle(v)}
+              onSelectVehicle={(v: Vehicle) => handleSelectVehicle(v)}
               showRoads={true}
               showVehicles={true}
               showAlerts={true}

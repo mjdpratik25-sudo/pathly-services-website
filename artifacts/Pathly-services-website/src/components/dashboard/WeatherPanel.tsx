@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { type WeatherData } from '../../data/nerData';
+import DataProvenance from '../common/DataProvenance';
 
 const WEATHER_ICONS: Record<WeatherData['condition'], { Icon: LucideIcon; color: string }> = {
   clear: { Icon: Sun, color: '#F59E0B' },
@@ -33,9 +34,11 @@ function WeatherConditionIcon({ condition }: { condition: WeatherData['condition
 interface WeatherPanelProps {
   weatherData: WeatherData[];
   onSelectDistrict?: (districtName: string) => void;
+  /** Data source surfaced by the hook, e.g. 'live' | 'local (key present but API unavailable)' | 'local weather feed (no API key)'. */
+  dataSourceLabel?: string;
 }
 
-export default function WeatherPanel({ weatherData, onSelectDistrict }: WeatherPanelProps) {
+export default function WeatherPanel({ weatherData, onSelectDistrict, dataSourceLabel }: WeatherPanelProps) {
   const [activeFilter, setActiveFilter] = useState<'all' | 'warning' | 'high_rain'>('all');
 
   const filtered = weatherData.filter((w) => {
@@ -165,9 +168,31 @@ export default function WeatherPanel({ weatherData, onSelectDistrict }: WeatherP
                 ⚠ Recommended action: {item.recommendedAction}
               </p>
             )}
+
+            {item.landslideWarning && (
+              <div className="mt-2 pt-2 border-t border-slate-100">
+                <DataProvenance
+                  source="PREDICTED"
+                  basis={`rainfall ${item.rainfall}mm/24h exceeds landslide trigger on ${item.state} terrain`}
+                  updatedBy="Weather Telemetry"
+                  updatedAt={item.lastUpdated || 'updated now'}
+                />
+              </div>
+            )}
           </div>
         ))}
       </div>
+
+      {/* Source of the values in this panel */}
+      {dataSourceLabel && (
+        <div className="pt-2 mt-2 border-t border-slate-200 flex items-center justify-between gap-2">
+          <DataProvenance
+            source={dataSourceLabel.startsWith('live') ? 'LIVE API' : 'LOCAL FEED'}
+            basis={`OpenWeatherMap endpoint ${dataSourceLabel.startsWith('live') ? 'reachable' : 'unavailable / no key'}`}
+            updatedBy="Weather Service"
+          />
+        </div>
+      )}
     </div>
   );
 }

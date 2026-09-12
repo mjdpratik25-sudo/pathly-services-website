@@ -21,7 +21,7 @@ import {
   Send
 } from 'lucide-react';
 import type { NERState } from '../data/nerData';
-import type { OfficerProfile } from '../components/auth/OfficerAuthModal';
+import { type OfficerProfile, GUEST_NAME } from '../components/auth/OfficerAuthModal';
 
 interface LoginProps {
   isDark: boolean;
@@ -39,6 +39,18 @@ const STATES: NERState[] = [
   'Sikkim'
 ];
 
+const LOGISTICS_PARTNERS = [
+  'Delhivery',
+  'Shiprocket',
+  'Ecom Express',
+  'XpressBees',
+  'Blue Dart',
+  'DTDC',
+  'Other'
+];
+
+const OTHER_PARTNER_OPTION = 'Other';
+
 export default function Login({ isDark }: LoginProps) {
   const [, setLocation] = useLocation();
 
@@ -51,7 +63,18 @@ export default function Login({ isDark }: LoginProps) {
   const [name, setName] = useState('');
   const [badgeId, setBadgeId] = useState('');
   const [department, setDepartment] = useState('');
-  const [state, setState] = useState<NERState>('Assam');
+  const [customDepartment, setCustomDepartment] = useState('');
+  const [state, setState] = useState<NERState | ''>('');
+  const [logisticsPartner, setLogisticsPartner] = useState('');
+  const [customLogisticsPartner, setCustomLogisticsPartner] = useState('');
+
+  const effectiveLogisticsPartner = () =>
+    logisticsPartner === OTHER_PARTNER_OPTION
+      ? customLogisticsPartner.trim() || 'Other'
+      : logisticsPartner;
+
+  const effectiveDepartment = () =>
+    department === OTHER_PARTNER_OPTION ? customDepartment.trim() || 'Other' : department;
 
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
   const [sentOtp, setSentOtp] = useState<string | null>(null);
@@ -69,38 +92,7 @@ export default function Login({ isDark }: LoginProps) {
     }, 400);
   };
 
-  const quickLogin = (type: 'admin' | 'sector' | 'field' | 'user') => {
-    const base: OfficerProfile = {
-      id: `adm-${Date.now().toString().slice(-4)}`,
-      name: 'Pratik Majumder',
-      role: 'Admin',
-      badgeId: 'REG-CMD-8842',
-      department: 'Regional Logistics Control Command',
-      state: 'Assam',
-      phone: '9864011223',
-      clearanceLevel: 4,
-      loggedInAt: new Date().toISOString(),
-      accountType: 'admin'
-    };
-    if (type === 'admin') {
-      /* keep base as admin */
-    } else if (type === 'sector') {
-      base.name = 'Debasish Chakraborty'; base.role = 'Sector Commander';
-      base.badgeId = 'TR-DIS-9910'; base.department = 'Sector Disaster Logistics';
-      base.state = 'Tripura'; base.phone = '9436122334'; base.accountType = 'officer';
-    } else if (type === 'field') {
-      base.name = 'Ranjan Barman'; base.role = 'Field Surveillance Officer';
-      base.badgeId = 'FLD-SURV-3312'; base.department = 'Highway Freight & Fleet Escort';
-      base.state = 'Meghalaya'; base.phone = '9864099887'; base.clearanceLevel = 3;
-      base.accountType = 'officer';
-    } else {
-      base.name = 'Amitabh Sharma'; base.role = 'Fleet Transporter & Citizen';
-      base.badgeId = 'USR-TR-4421'; base.department = 'Freight Transport Union';
-      base.state = 'Assam'; base.phone = '9864011223'; base.clearanceLevel = 1;
-      base.accountType = 'user';
-    }
-    finishAuth(base);
-  };
+  
 
   const handleOtpChange = (index: number, val: string) => {
     const cleaned = val.replace(/\D/g, '').slice(-1);
@@ -120,15 +112,16 @@ export default function Login({ isDark }: LoginProps) {
       setIsSubmitting(false);
       finishAuth({
         id: role === 'admin' ? 'adm-001' : 'usr-001',
-        name: name.trim() || (effectivePhone === '9864011223' ? 'Pratik Majumder' : role === 'admin' ? 'Admin User' : 'Registered User'),
+        name: name.trim() || GUEST_NAME,
         role: role === 'admin' ? 'Admin' : 'Public User / Transporter',
         badgeId: badgeId.trim() || (role === 'admin' ? 'REG-CMD-8842' : 'CITIZEN-USER'),
-        department: department.trim() || (role === 'admin' ? 'Regional Logistics Control' : 'Public Portal'),
-        state,
+        department: (role === 'admin' ? effectiveDepartment() : department.trim()) || (role === 'admin' ? 'Regional Logistics Control' : 'Public Portal'),
+        state: state === '' ? 'Assam' : state,
         phone: effectivePhone,
         clearanceLevel: role === 'admin' ? 4 : 1,
         loggedInAt: new Date().toISOString(),
-        accountType: role
+        accountType: role,
+        logisticsPartner: role === 'admin' ? effectiveLogisticsPartner() : undefined
       });
     }, 500);
   };
@@ -138,6 +131,10 @@ export default function Login({ isDark }: LoginProps) {
     const targetPhone = phone.trim() || '9864011223';
     setPhone(targetPhone);
     setAuthError(null);
+    if (mode === 'register' && state === '') {
+      setAuthError('Please select your primary state to continue.');
+      return;
+    }
     setSentOtp('592810');
     setOtpDigits(['5', '9', '2', '8', '1', '0']);
     setMode('otp');
@@ -154,11 +151,11 @@ export default function Login({ isDark }: LoginProps) {
       setIsSubmitting(false);
       finishAuth({
         id: `${role === 'admin' ? 'adm' : 'usr'}-${Date.now().toString().slice(-4)}`,
-        name: name || 'Pratik Majumder',
+        name: name.trim() || GUEST_NAME,
         role: role === 'admin' ? 'Admin' : 'Public User / Transporter',
         badgeId: badgeId || (role === 'admin' ? 'REG-CMD-8842' : 'USR-REG-1024'),
-        department: role === 'admin' ? 'Regional Logistics Control' : 'Public Portal',
-        state,
+        department: role === 'admin' ? effectiveDepartment() || 'Regional Logistics Control' : 'Public Portal',
+        state: state === '' ? 'Assam' : state,
         phone,
         clearanceLevel: role === 'admin' ? 4 : 1,
         loggedInAt: new Date().toISOString(),
@@ -226,39 +223,6 @@ export default function Login({ isDark }: LoginProps) {
           </div>
 
           <div className="p-5 space-y-4">
-            {/* Official demo notice box */}
-            <div className={`border px-3.5 py-3 ${isDark ? 'border-[#FFC107] bg-[#FFC107]/10' : 'border-[#0B3D6D] bg-[#0B3D6D]/5'}`}>
-              <p className={`text-[11px] font-bold mb-2 ${accent}`}>
-                For demonstration purposes, the following test roles are available:
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                {(
-                  [
-                    ['admin', 'Admin'],
-                    ['sector', 'Sector Cmd'],
-                    ['field', 'Field Officer'],
-                    ['user', 'Citizen / User']
-                  ] as const
-                ).map(([type, labelText]) => (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => quickLogin(type)}
-                    className={`border px-2 py-1.5 text-left text-[11px] font-medium transition-colors ${
-                      isDark
-                        ? 'border-[#FFC107]/60 text-white hover:bg-[#FFC107]/10'
-                        : 'border-[#0B3D6D]/50 text-[#0B3D6D] hover:bg-[#0B3D6D]/10'
-                    }`}
-                  >
-                    <span className="font-bold block">{labelText}</span>
-                    <span className={`text-[9px] ${bodyText}`}>
-                      {type === 'admin' ? 'Pratik (REG CMD)' : type === 'sector' ? 'Agartala Sector' : type === 'field' ? 'Highway Escort' : 'Transporter'}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* Mode tabs */}
             <div className={`flex border-b ${isDark ? 'border-[#2a2e35]' : 'border-[#d5dbe2]'}`}>
               {(['login', 'register', 'otp'] as const).map((m) => (
@@ -293,6 +257,32 @@ export default function Login({ isDark }: LoginProps) {
 
             {mode === 'login' && (
               <form onSubmit={handlePasswordLogin} className="space-y-3">
+                {role === 'admin' && (
+                  <div>
+                    <label className={`block text-xs font-semibold mb-1 ${label}`}>Logistics Partner</label>
+                    <select
+                      value={logisticsPartner}
+                      onChange={(e) => setLogisticsPartner(e.target.value)}
+                      className={`w-full px-3 py-2 text-xs border outline-none ${input} ${
+                        logisticsPartner ? '' : (isDark ? 'text-slate-500' : 'text-slate-400')
+                      }`}
+                    >
+                      <option value="" disabled>Select your logistics partner</option>
+                      {LOGISTICS_PARTNERS.map((partner) => (
+                        <option key={partner} value={partner}>{partner}</option>
+                      ))}
+                    </select>
+                    {logisticsPartner === OTHER_PARTNER_OPTION && (
+                      <input
+                        type="text"
+                        value={customLogisticsPartner}
+                        onChange={(e) => setCustomLogisticsPartner(e.target.value)}
+                        placeholder="Enter your logistics partner name"
+                        className={`w-full mt-2 px-3 py-2 text-xs border outline-none ${input}`}
+                      />
+                    )}
+                  </div>
+                )}
                 <div>
                   <label className={`block text-xs font-semibold mb-1 ${label}`}>
                     {role === 'admin' ? 'Mobile Number / Officer ID' : 'Mobile Number'}
@@ -303,7 +293,7 @@ export default function Login({ isDark }: LoginProps) {
                       type="tel"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
-                      placeholder="e.g. 9864011223"
+                      placeholder="e.g. 98XXXXXXXX"
                       className={`w-full pl-9 pr-3 py-2 text-xs border outline-none ${input}`}
                     />
                   </div>
@@ -358,7 +348,7 @@ export default function Login({ isDark }: LoginProps) {
                       type="text"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      placeholder="e.g. Pratik Majumder"
+                      placeholder="Your full name"
                       className={`w-full px-3 py-2 text-xs border outline-none ${input}`}
                     />
                   </div>
@@ -368,7 +358,7 @@ export default function Login({ isDark }: LoginProps) {
                       type="tel"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
-                      placeholder="e.g. 9864011223"
+                      placeholder="e.g. 98XXXXXXXX"
                       className={`w-full px-3 py-2 text-xs border outline-none ${input}`}
                     />
                   </div>
@@ -381,6 +371,7 @@ export default function Login({ isDark }: LoginProps) {
                       onChange={(e) => setState(e.target.value as NERState)}
                       className={`w-full px-3 py-2 text-xs border outline-none ${input}`}
                     >
+                      <option value="" disabled>Select State</option>
                       {STATES.map((s) => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </div>
@@ -402,14 +393,42 @@ export default function Login({ isDark }: LoginProps) {
                     {role === 'admin' ? 'Department / Agency' : 'Organization / Union (Optional)'}
                   </label>
                   <div className="relative">
-                    <Building2 size={14} className={`absolute left-3 top-2.5 ${bodyText}`} />
-                    <input
-                      type="text"
-                      value={department}
-                      onChange={(e) => setDepartment(e.target.value)}
-                      placeholder={role === 'admin' ? 'e.g. Regional Logistics Command' : 'e.g. Northeast Freight Union (Optional)'}
-                      className={`w-full pl-9 pr-3 py-2 text-xs border outline-none ${input}`}
-                    />
+                    {role === 'admin' ? (
+                      <>
+                        <select
+                          value={department}
+                          onChange={(e) => setDepartment(e.target.value)}
+                          className={`w-full px-3 py-2 text-xs border outline-none ${input} ${
+                            department ? '' : (isDark ? 'text-slate-500' : 'text-slate-400')
+                          }`}
+                        >
+                          <option value="" disabled>Select Department / Agency</option>
+                          {LOGISTICS_PARTNERS.map((name) => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                        </select>
+                        {department === OTHER_PARTNER_OPTION && (
+                          <input
+                            type="text"
+                            value={customDepartment}
+                            onChange={(e) => setCustomDepartment(e.target.value)}
+                            placeholder="e.g. Regional Logistics Command"
+                            className={`w-full mt-2 px-3 py-2 text-xs border outline-none ${input}`}
+                          />
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <Building2 size={14} className={`absolute left-3 top-2.5 ${bodyText}`} />
+                        <input
+                          type="text"
+                          value={department}
+                          onChange={(e) => setDepartment(e.target.value)}
+                          placeholder="e.g. Northeast Freight Union (Optional)"
+                          className={`w-full pl-9 pr-3 py-2 text-xs border outline-none ${input}`}
+                        />
+                      </>
+                    )}
                   </div>
                 </div>
                 <button
@@ -436,7 +455,7 @@ export default function Login({ isDark }: LoginProps) {
                   </p>
                   {sentOtp && (
                     <div className={`inline-flex items-center gap-1.5 px-3 py-1 text-xs font-mono font-bold mt-1 ${isDark ? 'bg-[#FFC107]/10 text-[#FFC107]' : 'bg-[#0B3D6D]/10 text-[#0B3D6D]'}`}>
-                      <span>Demo code:</span>
+                      <span>Access code:</span>
                       <span className="tracking-widest">{sentOtp}</span>
                     </div>
                   )}

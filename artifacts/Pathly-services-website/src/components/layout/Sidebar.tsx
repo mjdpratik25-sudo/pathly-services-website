@@ -19,10 +19,12 @@ import {
   Activity,
   Radio,
   Menu,
-  X
+  X,
+  Navigation
 } from 'lucide-react';
 import { PathlyLogoMark } from '../brand/PathlyLogo';
 import { useTranslation } from '../../i18n/LanguageContext';
+import { useRole, useFilteredNav } from '../../lib/roleAccess';
 
 interface NavItem {
   path: string;
@@ -67,6 +69,11 @@ export default function Sidebar({ alertCount = 0, isDark = false, collapsed = fa
       icon: <Truck size={18} />,
       section: t('sidebarOperations')
     },
+    {
+      path: '/driver-mode',
+      label: t('sidebarDriverMode'),
+      icon: <Navigation size={18} />,
+    },
     { 
       path: '/alerts', 
       label: t('sidebarAlertCenter'), 
@@ -84,7 +91,15 @@ export default function Sidebar({ alertCount = 0, isDark = false, collapsed = fa
       label: t('sidebarAnalytics'), 
       icon: <BarChart3 size={18} /> 
     },
+    { 
+      path: '/scenario', 
+      label: t('sidebarScenarioDemo'), 
+      icon: <Radio size={18} />,
+      section: t('sidebarIntelligence')
+    },
   ];
+
+  const visibleNav = useFilteredNav(navItems);
 
   const isActive = (path: string) => {
     if (path === '/') return location === '/';
@@ -134,9 +149,9 @@ export default function Sidebar({ alertCount = 0, isDark = false, collapsed = fa
       {/* 2. Scrollable Navigation + Grid Status (pinned footer stays at bottom) */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-none">
         <nav className={`py-5 px-3 flex flex-col overflow-x-hidden ${collapsed ? 'gap-3' : 'gap-1.5'}`}>
-        {navItems.map((item, index) => {
+        {visibleNav.map((item, index) => {
           const active = isActive(item.path);
-          const showSection = item.section && !collapsed && (index === 0 || navItems[index - 1]?.section !== item.section);
+          const showSection = item.section && !collapsed && (index === 0 || visibleNav[index - 1]?.section !== item.section);
 
           return (
             <React.Fragment key={item.path}>

@@ -34,10 +34,28 @@ import {
   type AlertSeverity, 
   type LogisticsAlert, 
   type NERState,
+  type GpsSource,
   MULTILINGUAL_LABELS 
 } from '../data/nerData';
 import { dispatchDriverSms } from '../lib/smsService';
 import { sendLocalOrFirebaseNotification } from '../lib/firebaseService';
+import { requireAuthAction } from '../lib/authGate';
+
+const ALERT_SOURCE_TAG: Record<GpsSource, string> = {
+  simulator: 'text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-500/10 border-amber-300 dark:border-amber-500/30',
+  driver_mobile: 'text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-500/10 border-emerald-300 dark:border-emerald-500/30',
+  real: 'text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-500/10 border-sky-300 dark:border-sky-500/30',
+};
+
+function AlertSourceTag({ source }: { source?: GpsSource }) {
+  if (!source) return null;
+  const label = source === 'driver_mobile' ? 'Driver Mobile Location' : source === 'real' ? 'Real GPS Device' : 'Vehicle Stream (Field Telemetry)';
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[8px] font-mono font-bold uppercase tracking-wide ${ALERT_SOURCE_TAG[source]}`}>
+      {label}
+    </span>
+  );
+}
 
 export default function AlertCenter() {
   const { 
@@ -91,8 +109,15 @@ export default function AlertCenter() {
     return true;
   });
 
+  // Guest view-only: filtering and dispatch actions require sign-in.
+  const handleCategoryFilter = (v: AlertCategory | 'ALL') => {
+    if (!requireAuthAction('Filter Alerts')) return;
+    setCategoryFilter(v);
+  };
+
   const handleCreateAlert = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!requireAuthAction('Broadcast Incident Alert')) return;
     if (!title || !description) return;
 
     const districtObj = NER_DISTRICTS.find((d) => d.name === district) || NER_DISTRICTS[0];
@@ -155,6 +180,7 @@ export default function AlertCenter() {
                       {selectedAlert.category.replace('_', ' ')}
                     </span>
                     <span className="text-xs font-mono font-bold text-blue-600 dark:text-blue-400">[{selectedAlert.state}]</span>
+                    <AlertSourceTag source={selectedAlert.source} />
                   </div>
                   <h2 className="text-xl font-black text-slate-900 dark:text-white mt-1">
                     {selectedAlert.title}
@@ -216,7 +242,10 @@ export default function AlertCenter() {
                   <span>Pinpoint on GIS Map</span>
                 </button>
                 <button
-                  onClick={() => setSelectedAlertForSms(selectedAlert)}
+                  onClick={() => {
+                    if (!requireAuthAction('SMS Driver')) return;
+                    setSelectedAlertForSms(selectedAlert);
+                  }}
                   className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-xs font-bold shadow-sm hover:shadow-md transition-all cursor-pointer"
                 >
                   <Smartphone size={14} />
@@ -224,6 +253,7 @@ export default function AlertCenter() {
                 </button>
                 <button
                   onClick={async () => {
+                    if (!requireAuthAction('Web Push')) return;
                     const res = await sendLocalOrFirebaseNotification({
                       title: `🚨 ${selectedAlert.title}`,
                       body: `${selectedAlert.location} [${selectedAlert.state}] • ${selectedAlert.description}`,
@@ -300,7 +330,10 @@ export default function AlertCenter() {
         </div>
 
         <button
-          onClick={() => setShowCreateModal(true)}
+          onClick={() => {
+            if (!requireAuthAction('Broadcast Incident Alert')) return;
+            setShowCreateModal(true);
+          }}
           className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-700 hover:to-red-700 text-white text-xs font-bold shadow-lg shadow-rose-600/30 transition-all self-start md:self-auto ring-2 ring-rose-400/20 cursor-pointer"
         >
           <Plus size={15} />
@@ -372,7 +405,7 @@ export default function AlertCenter() {
       {/* Filter Tabs with Rich Colorful Backgrounds */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none text-xs">
         <button
-          onClick={() => setCategoryFilter('ALL')}
+          onClick={() => handleCategoryFilter('ALL')}
           className={`px-3.5 py-1.5 rounded-xl font-bold whitespace-nowrap transition-all cursor-pointer shadow-xs ${
             categoryFilter === 'ALL'
               ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25 ring-1 ring-blue-400/20'
@@ -382,7 +415,7 @@ export default function AlertCenter() {
           All Incidents ({alerts.length})
         </button>
         <button
-          onClick={() => setCategoryFilter('landslide')}
+          onClick={() => handleCategoryFilter('landslide')}
           className={`px-3.5 py-1.5 rounded-xl font-bold whitespace-nowrap transition-all cursor-pointer shadow-xs ${
             categoryFilter === 'landslide'
               ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-md shadow-amber-500/25 ring-1 ring-amber-400/20'
@@ -392,7 +425,7 @@ export default function AlertCenter() {
           ⛰️ Landslides
         </button>
         <button
-          onClick={() => setCategoryFilter('flood')}
+          onClick={() => handleCategoryFilter('flood')}
           className={`px-3.5 py-1.5 rounded-xl font-bold whitespace-nowrap transition-all cursor-pointer shadow-xs ${
             categoryFilter === 'flood'
               ? 'bg-gradient-to-r from-sky-500 to-blue-600 text-white shadow-md shadow-sky-500/25 ring-1 ring-sky-400/20'
@@ -402,7 +435,7 @@ export default function AlertCenter() {
           🌊 Floods
         </button>
         <button
-          onClick={() => setCategoryFilter('bridge_closure')}
+          onClick={() => handleCategoryFilter('bridge_closure')}
           className={`px-3.5 py-1.5 rounded-xl font-bold whitespace-nowrap transition-all cursor-pointer shadow-xs ${
             categoryFilter === 'bridge_closure'
               ? 'bg-gradient-to-r from-rose-500 to-red-600 text-white shadow-md shadow-rose-500/25 ring-1 ring-rose-400/20'
@@ -412,7 +445,7 @@ export default function AlertCenter() {
           🌉 Bridge Closures
         </button>
         <button
-          onClick={() => setCategoryFilter('road_damage')}
+          onClick={() => handleCategoryFilter('road_damage')}
           className={`px-3.5 py-1.5 rounded-xl font-bold whitespace-nowrap transition-all cursor-pointer shadow-xs ${
             categoryFilter === 'road_damage'
               ? 'bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-md shadow-purple-500/25 ring-1 ring-purple-400/20'
@@ -434,13 +467,14 @@ export default function AlertCenter() {
                 : 'border-amber-200/80 dark:border-amber-500/30 bg-gradient-to-br from-amber-50/80 via-white to-amber-50/40 dark:from-amber-950/20 dark:via-slate-900 dark:to-slate-900'
             }`}
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <StatusBadge type="severity" value={alt.severity} />
-                <span className="text-xs font-mono text-blue-600 dark:text-blue-400 font-bold">[{alt.state}]</span>
+<div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <StatusBadge type="severity" value={alt.severity} />
+                  <span className="text-xs font-mono text-blue-600 dark:text-blue-400 font-bold">[{alt.state}]</span>
+                  <AlertSourceTag source={alt.source} />
+                </div>
+                <span className="text-[11px] font-mono text-slate-500 dark:text-[hsl(var(--muted-foreground))]">{alt.reportedAt}</span>
               </div>
-              <span className="text-[11px] font-mono text-slate-500 dark:text-[hsl(var(--muted-foreground))]">{alt.reportedAt}</span>
-            </div>
 
             <h3 className="font-bold text-sm text-slate-900 dark:text-white mt-2.5">{alt.title}</h3>
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">{alt.description}</p>
@@ -470,7 +504,10 @@ export default function AlertCenter() {
                   </span>
                 ) : (
                   <button
-                    onClick={() => acknowledgeAlert(alt.id)}
+                    onClick={() => {
+                      if (!requireAuthAction('Acknowledge Alert')) return;
+                      acknowledgeAlert(alt.id);
+                    }}
                     className="px-3 py-1 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-[11px] font-bold shadow-xs hover:shadow-md transition-all cursor-pointer"
                   >
                     Acknowledge
@@ -480,6 +517,7 @@ export default function AlertCenter() {
                 {/* SMS Dispatch Trigger */}
                 <button
                   onClick={() => {
+                    if (!requireAuthAction('SMS Driver')) return;
                     setSelectedAlertForSms(alt);
                     setSmsNotice(null);
                   }}
@@ -493,6 +531,7 @@ export default function AlertCenter() {
                 {/* Desktop Push Alert Trigger */}
                 <button
                   onClick={async () => {
+                    if (!requireAuthAction('Web Push')) return;
                     const res = await sendLocalOrFirebaseNotification({
                       title: `🚨 ${alt.title}`,
                       body: `${alt.location} [${alt.state}] • ${alt.description}`,
@@ -513,7 +552,10 @@ export default function AlertCenter() {
 
               {alt.isActive && (
                 <button
-                  onClick={() => resolveAlert(alt.id)}
+                  onClick={() => {
+                    if (!requireAuthAction('Resolve Alert')) return;
+                    resolveAlert(alt.id);
+                  }}
                   className="px-3 py-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-[11px] font-bold shadow-xs hover:shadow-md transition-all cursor-pointer"
                 >
                   Resolve Alert
@@ -621,6 +663,7 @@ export default function AlertCenter() {
               <button
                 type="button"
                 onClick={async () => {
+                  if (!requireAuthAction('SMS Driver')) return;
                   setSmsSending(true);
                   const res = await dispatchDriverSms({
                     recipientPhone: smsPhoneInput,

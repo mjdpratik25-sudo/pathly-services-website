@@ -6,6 +6,7 @@ import React from 'react';
 import { Sparkles, Brain, AlertCircle, TrendingUp, ShieldAlert, ArrowRight } from 'lucide-react';
 import { type DisruptionPrediction } from '../../lib/aiEngine';
 import RiskGauge from '../common/RiskGauge';
+import DataProvenance from '../common/DataProvenance';
 
 interface PredictionCardProps {
   prediction: DisruptionPrediction;
@@ -31,6 +32,9 @@ export default function PredictionCard({ prediction, onTakeAction }: PredictionC
             <span className="text-xs text-slate-600 font-medium">
               Confidence: <strong className="text-green-800 font-bold">{prediction.confidence}%</strong>
             </span>
+            <span className="ml-auto text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 border text-[#B45309] bg-amber-50 border-amber-600 hidden sm:inline-flex">
+              PREDICTED
+            </span>
           </div>
 
           <h4 className="text-sm font-bold text-slate-900 mt-1">
@@ -40,6 +44,26 @@ export default function PredictionCard({ prediction, onTakeAction }: PredictionC
           <p className="text-xs text-slate-700 mt-1.5 leading-relaxed">
             {prediction.recommendation}
           </p>
+
+          {/* Item 4 — hybrid signal mix (rules + ML + field reports) */}
+          {(prediction as any).probabilityBreakdown && (
+            <div className="mt-3 p-2.5 border border-slate-200 bg-slate-50">
+              <div className="flex items-center justify-between text-[9px] font-bold uppercase tracking-wider text-slate-500 font-mono">
+                <span>Hybrid signal mix</span>
+                <span>{(((prediction as any).probabilityBreakdown as any).final ?? prediction.probability)}% probability</span>
+              </div>
+              <div className="mt-1.5 flex h-1.5 w-full overflow-hidden border border-slate-200">
+                <div className="bg-[#0B3D6D]" style={{ width: `${((prediction as any).probabilityBreakdown.rules / 100) * 100}%` }} title={`Rules ${(prediction as any).probabilityBreakdown.rules}%`} />
+                <div className="bg-[#FF9933]" style={{ width: `${((prediction as any).probabilityBreakdown.ml / 100) * 100}%` }} title={`ML ${(prediction as any).probabilityBreakdown.ml}%`} />
+                <div className="bg-emerald-600" style={{ width: `${((prediction as any).probabilityBreakdown.field / 100) * 100}%` }} title={`Field ${(prediction as any).probabilityBreakdown.field}%`} />
+              </div>
+              <div className="mt-1 flex items-center gap-3 text-[9px] font-mono text-slate-500">
+                <span><span className="inline-block w-2 h-2 bg-[#0B3D6D]" /> rules {(prediction as any).probabilityBreakdown.rules}%</span>
+                <span><span className="inline-block w-2 h-2 bg-[#FF9933]" /> ML {(prediction as any).probabilityBreakdown.ml}%</span>
+                <span><span className="inline-block w-2 h-2 bg-emerald-600" /> field {(prediction as any).probabilityBreakdown.field}%</span>
+              </div>
+            </div>
+          )}
 
           {/* Key Drivers */}
           <div className="mt-3 flex flex-wrap gap-1.5">
@@ -78,6 +102,16 @@ export default function PredictionCard({ prediction, onTakeAction }: PredictionC
           <span>Divert Fleet</span>
           <ArrowRight size={13} />
         </button>
+      </div>
+
+      {/* Provenance — where this estimate came from */}
+      <div className="mt-2 pt-2 border-t border-slate-100">
+        <DataProvenance
+          source="PREDICTED"
+          basis="rainfall + terrain + soil-saturation + historical district risk (documented rule model — not a neural network)"
+          confidence={prediction.confidence}
+          updatedBy="Pathly Risk Model"
+        />
       </div>
     </div>
   );

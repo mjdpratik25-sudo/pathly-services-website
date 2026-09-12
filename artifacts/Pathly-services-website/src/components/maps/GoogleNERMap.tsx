@@ -25,7 +25,6 @@ import {
 } from 'lucide-react';
 import {
   NER_DISTRICTS,
-  ROAD_SEGMENTS,
   GIS_INFRASTRUCTURE,
   NER_LOCALITIES,
   type Vehicle,
@@ -33,10 +32,15 @@ import {
   type NERDistrict,
   type NERState,
   type RoadSegment,
+  type FieldReport,
   getCargoIcon,
   getRoadStatusColor,
   getTrafficColor
 } from '../../data/nerData';
+import { getRoadSegments, useScenario } from '../../lib/scenarioEngine';
+import { buildVehicleRoute, resolveTownCoords } from '../../lib/routeGeometry';
+import { syncPlace, ensurePlace, shortPlaceName } from '../../lib/placeNames';
+import { requireAuthAction } from '../../lib/authGate';
 import NERMap from './NERMap';
 import TacticalNERMap from './TacticalNERMap';
 import { lockScroll, unlockScroll } from '../../lib/scrollLock';
@@ -56,6 +60,7 @@ export interface ExactLocationResult {
 interface GoogleNERMapProps {
   vehicles?: Vehicle[];
   alerts?: LogisticsAlert[];
+  fieldReports?: FieldReport[];
   selectedDistrict?: NERDistrict | null;
   selectedVehicle?: Vehicle | null;
   onSelectDistrict?: (district: NERDistrict) => void;
@@ -107,6 +112,10 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
     isSidebarOpen = true,
   } = props;
 
+  // Subscribe to the scenario engine so the drill's DRILL FEED
+  // segment states render live on the Google map.
+  useScenario();
+
   const mapRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const autocompleteRef = useRef<any>(null);
@@ -119,6 +128,11 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
   const polylinesRef = useRef<any[]>([]);
   const infoWindowRef = useRef<any>(null);
   const fallbackTimeoutRef = useRef<number | null>(null);
+  const focusedMarkerRef = useRef<any>(null);
+  const pulseCircleRef = useRef<any>(null);
+  const pulseIntervalRef = useRef<number | null>(null);
+  const lastSyncedSelectionRef = useRef<string | null>(null);
+  const exactFocusIdRef = useRef<string | null>(null);
 
   const [mapType, setMapType] = useState<'roadmap' | 'terrain' | 'satellite' | 'hybrid'>('roadmap');
   const [trafficEnabled, setTrafficEnabled] = useState(true);
@@ -291,6 +305,9 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
       failObserver?.disconnect();
       markersRef.current.forEach(m => m?.setMap?.(null));
       polylinesRef.current.forEach(p => p?.setMap?.(null));
+      if (focusedMarkerRef.current) focusedMarkerRef.current.setMap(null);
+      if (pulseCircleRef.current) pulseCircleRef.current.setMap(null);
+      if (pulseIntervalRef.current) window.clearInterval(pulseIntervalRef.current);
       if (searchedMarkerRef.current) searchedMarkerRef.current.setMap(null);
       if (searchedCircleRef.current) searchedCircleRef.current.setMap(null);
     };
@@ -435,6 +452,7 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
 
   // Track a specific vehicle / order token
   const handleTrackVehicle = useCallback((veh: Vehicle) => {
+    exactFocusIdRef.current = null;
     setTrackedVehicle(veh);
     setExactLocation(null);
     setSelectedRoad(null);
@@ -449,6 +467,47 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
       map.setZoom(15);
     }
   }, [onSelectVehicle]);
+
+  // Snap the map to the tightest zoom on the vehicle's exact GPS fix,
+  // labelling the precise coordinates directly on the marker and
+  // keeping the route + traveled/remaining context visible.
+  const focusVehicleExact = useCallback((veh: Vehicle, zoom = 17) => {
+    handleTrackVehicle(veh);
+    exactFocusIdRef.current = veh.id;
+    const map = googleMapInstance.current;
+    if (map) {
+      map.panTo({ lat: veh.currentLat, lng: veh.currentLng });
+      map.setZoom(zoom);
+    }
+  }, [handleTrackVehicle]);
+
+  // Re-center & highlight whenever a vehicle is selected from outside this
+  // map (e.g. the fleet list beside the map) — but never re-pan on the
+  // 5s telemetry refresh for the same selection.
+  useEffect(() => {
+    if (!selectedVehicle || !isLoaded) return;
+    if (lastSyncedSelectionRef.current === selectedVehicle.id) return;
+    lastSyncedSelectionRef.current = selectedVehicle.id;
+    const map = googleMapInstance.current;
+    if (map) {
+      map.panTo({ lat: selectedVehicle.currentLat, lng: selectedVehicle.currentLng });
+      map.setZoom(15);
+    }
+    setTrackedVehicle(selectedVehicle);
+  }, [selectedVehicle, isLoaded]);
+
+  // External "View Exact GPS Location on Map" action (e.g. the order detail
+  // panel) → focus tight on the vehicle's exact GPS fix.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const veh = (e as CustomEvent<Vehicle>).detail;
+      if (veh && veh.currentLat !== undefined && veh.currentLng !== undefined) {
+        focusVehicleExact(veh, 17);
+      }
+    };
+    window.addEventListener('pathly_navigate_vehicle', handler);
+    return () => window.removeEventListener('pathly_navigate_vehicle', handler);
+  }, [focusVehicleExact]);
 
   // Debounced search suggestions via free Nominatim + Instant Vehicle Order Token Matching
   const handleSearchInput = useCallback((value: string) => {
@@ -746,6 +805,7 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
     setShowSearchPresets(false);
     setTrackedVehicle(null);
     setSelectedRoad(null);
+    exactFocusIdRef.current = null;
 
     // 2. Pan and reset Google Maps zoom & force fresh tile render
     if (googleMapInstance.current) {
@@ -855,6 +915,21 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
     return () => window.removeEventListener('pathly_navigate_location', handleGlobalNav);
   }, [setExactLocationPin]);
 
+  // Mark Google map overlay/tile images as decorative for assistive tech.
+  useEffect(() => {
+    const mark = () => {
+      if (!mapRef.current) return;
+      mapRef.current.querySelectorAll('img').forEach((el) => {
+        el.setAttribute('alt', '');
+        el.setAttribute('aria-hidden', 'true');
+        el.setAttribute('role', 'presentation');
+      });
+    };
+    mark();
+    const t = window.setInterval(mark, 2000);
+    return () => window.clearInterval(t);
+  }, [mapRef]);
+
   // 3. Render Markers & Polylines Safely
   useEffect(() => {
     const map = googleMapInstance.current;
@@ -864,12 +939,24 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
     try {
       markersRef.current.forEach(m => m?.setMap?.(null));
       polylinesRef.current.forEach(p => p?.setMap?.(null));
+      if (focusedMarkerRef.current) {
+        focusedMarkerRef.current.setMap(null);
+        focusedMarkerRef.current = null;
+      }
+      if (pulseCircleRef.current) {
+        pulseCircleRef.current.setMap(null);
+        pulseCircleRef.current = null;
+      }
+      if (pulseIntervalRef.current) {
+        window.clearInterval(pulseIntervalRef.current);
+        pulseIntervalRef.current = null;
+      }
       markersRef.current = [];
       polylinesRef.current = [];
 
       // A. Road Polylines
       if (roadsEnabled) {
-        ROAD_SEGMENTS.forEach((road) => {
+        getRoadSegments().forEach((road) => {
           const roadColor = trafficEnabled ? getTrafficColor(road.trafficCongestion) : getRoadStatusColor(road.status);
           const isBlocked = road.status === 'blocked';
           const isSelected = selectedRoad?.id === road.id;
@@ -930,29 +1017,157 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
         });
 
       // C. Vehicles
+      const focusedId = trackedVehicle?.id ?? selectedVehicle?.id;
       if (showVehicles) {
         vehicles.forEach((v) => {
+          const isFocused = v.id === focusedId;
           const marker = new google.maps.Marker({
             position: { lat: v.currentLat, lng: v.currentLng },
             map,
             title: `${v.registrationNo} (${v.driverName})`,
-            icon: {
-              path: google.maps.SymbolPath?.FORWARD_CLOSED_ARROW || 1,
-              scale: 5,
-              fillColor: v.status === 'delayed' ? '#d97706' : '#2563eb',
-              fillOpacity: 1,
-              strokeColor: '#ffffff',
-              strokeWeight: 1.5,
-              rotation: v.heading || 45,
-            },
+            icon: isFocused
+              ? {
+                  path: google.maps.SymbolPath?.FORWARD_CLOSED_ARROW || 1,
+                  scale: 8,
+                  fillColor: '#0B3D6D',
+                  fillOpacity: 1,
+                  strokeColor: '#ffffff',
+                  strokeWeight: 3,
+                  rotation: v.heading || 45,
+                }
+              : {
+                  path: google.maps.SymbolPath?.FORWARD_CLOSED_ARROW || 1,
+                  scale: 5,
+                  fillColor: v.status === 'delayed' ? '#d97706' : '#2563eb',
+                  fillOpacity: 1,
+                  strokeColor: '#ffffff',
+                  strokeWeight: 1.5,
+                  rotation: v.heading || 45,
+                },
+          zIndex: isFocused ? 6 : 2,
           });
 
           marker.addListener('click', () => {
             handleTrackVehicle(v);
           });
 
+          if (isFocused) {
+            focusedMarkerRef.current = marker;
+            if (exactFocusIdRef.current === v.id) {
+              const place = syncPlace(v.currentLat, v.currentLng);
+              const coordsTxt = `${v.currentLat.toFixed(4)}°N, ${v.currentLng.toFixed(4)}°E`;
+              const labelTxt =
+                place.formatted.length > 0
+                  ? `${coordsTxt} · ${shortPlaceName(place)}`
+                  : coordsTxt;
+              marker.setLabel({
+                text: labelTxt,
+                color: '#0B3D6D',
+                fontWeight: 'bold',
+                fontSize: '11px',
+              });
+              infoWindowRef.current?.setContent(buildExactPopup(v, place));
+              infoWindowRef.current?.open(map, marker);
+
+              // Upgrade the provisional local name (town/district) with a
+              // precise reverse-geocoded place once available.
+              if (place.source === 'locality' || place.source === 'district') {
+                ensurePlace(v.currentLat, v.currentLng).then((upgraded) => {
+                  if (exactFocusIdRef.current !== v.id || !infoWindowRef.current) return;
+                  const m = focusedMarkerRef.current;
+                  if (m) {
+                    m.setLabel({
+                      text: `${coordsTxt} · ${shortPlaceName(upgraded)}`,
+                      color: '#0B3D6D',
+                      fontWeight: 'bold',
+                      fontSize: '11px',
+                    });
+                  }
+                  infoWindowRef.current.setContent(buildExactPopup(v, upgraded));
+                });
+              }
+            }
+          }
+
           markersRef.current.push(marker);
         });
+      }
+
+      // C2. Highlight ring + planned route for the focused vehicle
+      if (focusedId) {
+        const focused = vehicles.find((x) => x.id === focusedId);
+        if (focused) {
+          const pulse = new google.maps.Circle({
+            map,
+            center: { lat: focused.currentLat, lng: focused.currentLng },
+            radius: 120,
+            strokeColor: '#ffffff',
+            strokeOpacity: 1,
+            strokeWeight: 3,
+            fillColor: '#2563eb',
+            fillOpacity: 0.22,
+            zIndex: 5,
+          });
+          pulseCircleRef.current = pulse;
+          if (pulseIntervalRef.current) window.clearInterval(pulseIntervalRef.current);
+          let r = 120;
+          let growing = true;
+          pulseIntervalRef.current = window.setInterval(() => {
+            r += growing ? 70 : -70;
+            if (r >= 300) growing = false;
+            if (r <= 110) growing = true;
+            pulseCircleRef.current?.setRadius(r);
+          }, 550);
+
+          const route = buildVehicleRoute(focused);
+          if (route) {
+            const traveled = new google.maps.Polyline({
+              path: route.traveled.map(([lat, lng]) => ({ lat, lng })),
+              geodesic: true,
+              strokeColor: '#059669',
+              strokeOpacity: 0.95,
+              strokeWeight: 6,
+              map,
+              zIndex: 20,
+            });
+            const remaining = new google.maps.Polyline({
+              path: route.remaining.map(([lat, lng]) => ({ lat, lng })),
+              geodesic: true,
+              strokeColor: '#64748b',
+              strokeOpacity: 0.85,
+              strokeWeight: 4,
+              icons: [{ icon: { path: 'M 0,-1 0,1' }, offset: '0', repeat: '14px' }],
+              map,
+              zIndex: 15,
+            });
+            polylinesRef.current.push(traveled, remaining);
+
+            const start = resolveTownCoords(focused.origin);
+            const end = resolveTownCoords(focused.destination);
+            if (start) {
+              markersRef.current.push(
+                new google.maps.Marker({
+                  position: { lat: start.lat, lng: start.lng },
+                  map,
+                  title: focused.origin,
+                  label: { text: 'O', color: '#059669', fontWeight: 'bold', fontSize: '12px' },
+                  zIndex: 18,
+                })
+              );
+            }
+            if (end) {
+              markersRef.current.push(
+                new google.maps.Marker({
+                  position: { lat: end.lat, lng: end.lng },
+                  map,
+                  title: focused.destination,
+                  label: { text: 'D', color: '#0B3D6D', fontWeight: 'bold', fontSize: '12px' },
+                  zIndex: 18,
+                })
+              );
+            }
+          }
+        }
       }
 
       // D. Alerts
@@ -1000,7 +1215,7 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
     } catch (err) {
       console.warn('Google Maps overlay warning:', err);
     }
-  }, [isLoaded, vehicles, alerts, roadsEnabled, showVehicles, showAlerts, selectedDistrict, selectedVehicle, trafficEnabled, selectedRoad, stateFilter, setExactLocationPin]);
+  }, [isLoaded, vehicles, alerts, roadsEnabled, showVehicles, showAlerts, selectedDistrict, selectedVehicle, trackedVehicle, trafficEnabled, selectedRoad, stateFilter, setExactLocationPin]);
 
   // Initial location prop listener
   useEffect(() => {
@@ -1152,7 +1367,7 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
             >
               <span>🛣️ Roads</span>
               <span className={`text-[10px] px-1 rounded font-mono ${roadsEnabled ? 'bg-blue-700 text-white' : 'bg-slate-200 text-slate-700'}`}>
-                ({ROAD_SEGMENTS.length})
+                ({getRoadSegments().length})
               </span>
             </button>
 
@@ -1227,6 +1442,7 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
               <button
                 type="button"
                 onClick={() => {
+                  if (!requireAuthAction('Track Orders')) return;
                   setShowOrderPresets((prev) => !prev);
                   setShowSearchPresets(false);
                 }}
@@ -1602,5 +1818,27 @@ export default function GoogleNERMap(props: GoogleNERMapProps) {
       </div>
     </div>
   );
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+}
+
+// Exact GPS popup card — same layout/colors throughout, with the
+// reverse-geocoded place name always present below the coordinates line.
+function buildExactPopup(v: Vehicle, place: { formatted: string }): string {
+  return `<div style="background:#ffffff;border:1px solid #b8c1ce;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.28);padding:0;overflow:hidden;font-family:ui-monospace,monospace;">
+                   <div style="padding:8px 12px;background:#eef1f5;border-bottom:1px solid #d5dbe2;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                     <strong style="color:#0B3D6D;font-size:12px;">${escapeHtml(v.registrationNo)}</strong>
+                     <span style="font-size:10px;color:#334155;">${v.speed} km/h · ${v.progress}% · ETA ${escapeHtml(v.eta)}</span>
+                   </div>
+                   <div style="padding:10px 12px 6px;font-size:11px;color:#334155;">${escapeHtml(v.origin)} ➔ ${escapeHtml(v.destination)}</div>
+                   <div style="margin:6px 12px 4px;padding:7px 10px;background:#0B3D6D;border-radius:6px;">
+                     <span style="color:#ffffff;font-weight:bold;font-size:12px;">Exact GPS: ${v.currentLat.toFixed(6)}°N, ${v.currentLng.toFixed(6)}°E</span>
+                   </div>
+                   <div style="margin:0 12px 10px;padding:6px 10px;background:#eef1f5;border:1px solid #d5dbe2;border-radius:6px;font-size:11px;color:#0B3D6D;font-weight:bold;">
+                     Near: ${escapeHtml(place.formatted)}
+                   </div>
+                 </div>`;
 }
 

@@ -1,7 +1,18 @@
 // ============================================================
 // NER-SAIL: Real GPS Tracker Hardware Telemetry Ingestion Pipeline
 // Supports AIS-140 / Teltonika / Queclink & Mobile GPS Pings
+// ------------------------------------------------------------
+// All telemetry is now persisted through the SQLite pipeline in
+// gpsPipeline (ingest → storage → derived trips/stops → geofencing).
+// These legacy entrypoints keep their previous call signatures so
+// existing routes keep working while data flows to the real store.
 // ============================================================
+
+import {
+  ingestLocationPing,
+  getAllActiveTelemetryForLegacy,
+  type LocationPing,
+} from './gpsPipeline';
 
 export interface GPSPingPayload {
   vehicleId: string;
@@ -25,57 +36,48 @@ export interface GPSPingResponse {
   geofenceAlert: boolean;
   message: string;
   processedAt: string;
+  source: string;
+  sourceLabel: string;
 }
-
-// In-Memory Live State Cache for Ultra-Fast Telemetry Stream
-const activeTelemetryCache = new Map<string, GPSPingPayload & { lastPing: Date; status: string }>();
 
 /**
  * Ingests and validates hardware GPS pings from vehicles.
+ * (Persisted through the real pipeline — trips/stops/alerts are derived.)
  */
 export function processGPSPing(payload: GPSPingPayload): GPSPingResponse {
-  if (!payload.vehicleId || typeof payload.lat !== 'number' || typeof payload.lng !== 'number') {
-    throw new Error('Invalid GPS ping payload: missing vehicleId or coordinates');
-  }
+  const ping: LocationPing = {
+    vehicleId: payload.vehicleId,
+    latitude: payload.lat,
+    longitude: payload.lng,
+    speed: payload.speed,
+    heading: payload.heading,
+    timestamp: payload.timestamp,
+    imei: payload.imei,
+    source: payload.imei ? 'real' : 'simulator',
+  };
+  const result = ingestLocationPing(ping);
 
-  // Determine state based on speed and heading
-  let status: GPSPingResponse['status'] = 'in_transit';
-  if (payload.speed < 3) {
-    status = 'stopped';
-  } else if (payload.speed < 20) {
-    status = 'delayed'; // Heavy traffic / mountain slowdown
-  }
-
-  // Check geofence boundary (North East India bounding box: Lat 21.5 to 29.5, Lng 88.0 to 97.5)
-  const isInsideNER = (
-    payload.lat >= 21.5 && payload.lat <= 29.5 &&
-    payload.lng >= 88.0 && payload.lng <= 97.5
-  );
-
-  const geofenceAlert = !isInsideNER;
-  if (geofenceAlert) {
-    status = 'geofence_breach';
-  }
-
-  activeTelemetryCache.set(payload.vehicleId, {
-    ...payload,
-    lastPing: new Date(),
-    status,
-  });
+  const insideNER =
+    result.lastKnown.lat >= 21.5 && result.lastKnown.lat <= 29.5 &&
+    result.lastKnown.lng >= 88.0 && result.lastKnown.lng <= 97.5;
+  const geofenceAlert = !insideNER;
+  const mappedStatus = result.status === 'delivered' ? 'stopped' : result.status;
 
   return {
     success: true,
     vehicleId: payload.vehicleId,
-    status,
-    speedKmh: Math.round(payload.speed),
+    status: geofenceAlert ? 'geofence_breach' : mappedStatus,
+    speedKmh: Math.round(result.lastKnown.speed),
     geofenceAlert,
     message: geofenceAlert
       ? 'WARNING: Vehicle exited designated North East corridor boundary.'
-      : 'Telemetry ping synchronized successfully.',
-    processedAt: new Date().toISOString(),
+      : 'Telemetry ping synchronized and persisted successfully.',
+    processedAt: result.receivedAt,
+    source: result.source,
+    sourceLabel: result.sourceLabel,
   };
 }
 
 export function getAllActiveTelemetry() {
-  return Array.from(activeTelemetryCache.values());
+  return getAllActiveTelemetryForLegacy();
 }

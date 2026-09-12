@@ -27,14 +27,17 @@ import {
   Layers,
   ArrowRight,
   User,
-  Menu
+  Menu,
+  ChevronDown,
+  Check,
+  Shield
 } from 'lucide-react';
 import { PathlyLogoMark } from '../brand/PathlyLogo';
 import { useTranslation } from '../../i18n/LanguageContext';
+import { useRole, ROLES } from '../../lib/roleAccess';
 import { useLocation } from 'wouter';
 import { 
   NER_DISTRICTS, 
-  ROAD_SEGMENTS, 
   VEHICLES, 
   INITIAL_ALERTS, 
   NER_LOCALITIES,
@@ -48,6 +51,7 @@ import {
   type NERLocality,
   type GISInfrastructure
 } from '../../data/nerData';
+import { getRoadSegments, useScenario } from '../../lib/scenarioEngine';
 
 interface HeaderProps {
   currentLanguage: string;
@@ -64,6 +68,7 @@ interface HeaderProps {
 import NotificationsDrawer from './NotificationsDrawer';
 import OfficerProfileDrawer from './OfficerProfileDrawer';
 import OfficerAuthModal, { type OfficerProfile } from '../auth/OfficerAuthModal';
+import { requireAuthAction } from '../../lib/authGate';
 import { lockScroll, unlockScroll } from '../../lib/scrollLock';
 
 export default function Header({
@@ -80,6 +85,9 @@ export default function Header({
   const [, setLocation] = useLocation();
   const { t } = useTranslation();
   const [timeStr, setTimeStr] = useState('');
+
+  // Subscribe to the scenario engine so header search reflects DRILL FEED segment states.
+  useScenario();
 
   // Modals & Drawers State
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -201,16 +209,41 @@ export default function Header({
   }, []);
 
   const handleLogout = () => {
+    // Clear all session/identity data (previous user's profile, demo role,
+    // cached session material) before the hard reload below.
     try {
       localStorage.removeItem('pathly_officer_session');
+      localStorage.removeItem('pathly_role');
+    } catch {}
+    try {
+      sessionStorage.clear();
     } catch {}
     setOfficer(null);
     setIsProfileOpen(false);
+
+    // Full page reload → guarantees NO stale React/app state survives after
+    // sign-out (the earlier bug where a new session showed the previous
+    // admin's name). Lands on the Home dashboard in clean guest/view-only
+    // mode — the Sign In prompt is only ever shown on an explicit action,
+    // never as an automatic redirect after sign-out.
+    window.location.assign('/');
   };
 
   const handleLoginSuccess = (newOfficer: OfficerProfile) => {
     setOfficer(newOfficer);
     setIsAuthModalOpen(false);
+  };
+
+  // Item 8 — demo role switcher (Control Room / Field Officer / Driver)
+  const { role, setRole, roleLabel } = useRole();
+  const [roleMenuOpen, setRoleMenuOpen] = useState(false);
+
+  // Each role lands on its matching screen when selected.
+  const ROLE_HOME: Record<string, string> = {
+    control_room: '/',
+    field_officer: '/field-reports',
+    driver: '/driver-mode',
+    admin: '/',
   };
 
   // Compute Search Results across all platform domains
@@ -220,7 +253,7 @@ export default function Header({
       return {
         localities: NER_LOCALITIES.slice(0, 3),
         districts: NER_DISTRICTS.slice(0, 3),
-        highways: ROAD_SEGMENTS.slice(0, 2),
+        highways: getRoadSegments().slice(0, 2),
         vehicles: VEHICLES.slice(0, 2),
         alerts: INITIAL_ALERTS.slice(0, 2),
         infrastructure: GIS_INFRASTRUCTURE.slice(0, 2),
@@ -256,7 +289,7 @@ export default function Header({
       d.nhConnected.some(nh => nh.toLowerCase().includes(q))
     ).slice(0, 3);
 
-    const matchedHighways = ROAD_SEGMENTS.filter(r =>
+    const matchedHighways = getRoadSegments().filter(r =>
       r.name.toLowerCase().includes(q) ||
       r.from.toLowerCase().includes(q) ||
       r.to.toLowerCase().includes(q) ||
@@ -432,6 +465,7 @@ export default function Header({
   };
 
   const handleSelectItem = (action: () => void) => {
+    if (!requireAuthAction('Global Search')) return;
     action();
   };
 
@@ -507,21 +541,21 @@ export default function Header({
         {/* Search Results Dropdown Popup */}
         {isOpen && (
           <div 
-            className="absolute top-full left-0 right-0 mt-2 rounded-2xl shadow-2xl overflow-hidden z-[100] animate-fade-in divide-y divide-slate-100 dark:divide-slate-800 max-h-[480px] overflow-y-auto border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+            className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-[calc(100vw-2rem)] max-w-md md:max-w-lg lg:max-w-xl xl:max-w-2xl rounded-2xl shadow-2xl overflow-hidden z-[100] animate-fade-in divide-y divide-slate-100 dark:divide-slate-800 max-h-[480px] overflow-y-auto border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
             style={{ opacity: 1, isolation: 'isolate' }}
           >
             {/* Header Status in Dropdown */}
-            <div className="px-4 py-2 bg-slate-50 dark:bg-slate-800/60 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-mono font-semibold">
-              <span>{searchQuery ? `Search results for "${searchQuery}"` : 'Quick Navigation & Logistics Directory'}</span>
-              <span className="text-[10px] bg-blue-500/10 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-full font-bold">{searchResults.totalCount} matches</span>
+            <div className="px-4 py-2 bg-slate-50 dark:bg-slate-800/60 flex items-center justify-between gap-3 text-[11px] text-slate-500 dark:text-slate-400 font-mono font-semibold">
+              <span className="min-w-0 truncate">{searchQuery ? `Search results for "${searchQuery}"` : 'Quick Navigation & Logistics Directory'}</span>
+              <span className="shrink-0 whitespace-nowrap text-[10px] bg-blue-500/10 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-full font-bold">{searchResults.totalCount} matches</span>
             </div>
 
             {/* A0. In-Depth Localities & Neighborhoods */}
             {searchResults.localities.length > 0 && (
               <div className="p-2 bg-blue-500/5">
                 <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 font-mono flex items-center gap-1.5">
-                  <MapPin size={11} />
-                  <span>In-Depth Localities & Neighborhoods ({searchResults.localities.length})</span>
+                  <MapPin size={11} className="shrink-0" />
+                  <span className="min-w-0">In-Depth Localities & Neighborhoods ({searchResults.localities.length})</span>
                 </div>
                 <div className="space-y-1 mt-1">
                   {searchResults.localities.map((loc) => (
@@ -537,11 +571,11 @@ export default function Header({
                       })}
                       className="px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer flex items-center justify-between transition-colors group"
                     >
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-xs">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-xs shrink-0">
                           📍
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                             {loc.name} <span className="text-[11px] font-normal text-slate-500">({loc.city}, {loc.state})</span>
                           </p>
@@ -550,7 +584,7 @@ export default function Header({
                           </p>
                         </div>
                       </div>
-                      <div className="text-right flex items-center gap-2">
+                      <div className="text-right flex items-center gap-2 shrink-0">
                         <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 uppercase">
                           {loc.category.replace('_', ' ')}
                         </span>
@@ -566,8 +600,8 @@ export default function Header({
             {searchResults.infrastructure.length > 0 && (
               <div className="p-2 bg-emerald-500/5">
                 <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-mono flex items-center gap-1.5">
-                  <Layers size={11} />
-                  <span>Strategic GIS Infrastructure</span>
+                  <Layers size={11} className="shrink-0" />
+                  <span className="min-w-0">Strategic GIS Infrastructure</span>
                 </div>
                 <div className="space-y-1 mt-1">
                   {searchResults.infrastructure.map((gis) => (
@@ -583,11 +617,11 @@ export default function Header({
                       })}
                       className="px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer flex items-center justify-between transition-colors group"
                     >
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-xs">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-xs shrink-0">
                           {gis.type === 'strategic_bridge' ? '🌉' : gis.type === 'mountain_pass' ? '⛰️' : gis.type === 'emergency_helipad' ? '🚁' : '⛽'}
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
                             {gis.name}
                           </p>
@@ -596,7 +630,7 @@ export default function Header({
                           </p>
                         </div>
                       </div>
-                      <div className="text-right flex items-center gap-2">
+                      <div className="text-right flex items-center gap-2 shrink-0">
                         <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 uppercase">
                           {gis.status}
                         </span>
@@ -612,8 +646,8 @@ export default function Header({
             {searchResults.districts.length > 0 && (
               <div className="p-2">
                 <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 font-mono flex items-center gap-1.5">
-                  <MapPin size={11} />
-                  <span>Districts & Logistics Hubs</span>
+                  <MapPin size={11} className="shrink-0" />
+                  <span className="min-w-0">Districts & Logistics Hubs</span>
                 </div>
                 <div className="space-y-1 mt-1">
                   {searchResults.districts.map((d) => (
@@ -629,11 +663,11 @@ export default function Header({
                       })}
                       className="px-3 py-2 rounded-xl hover:bg-[hsl(var(--muted))] cursor-pointer flex items-center justify-between transition-colors group"
                     >
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center font-bold text-xs">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center font-bold text-xs shrink-0">
                           {d.state.slice(0, 2).toUpperCase()}
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-xs font-bold text-[hsl(var(--foreground))] group-hover:text-blue-400 transition-colors">
                             {d.name} <span className="text-[11px] font-normal text-[hsl(var(--muted-foreground))]">({d.majorTown})</span>
                           </p>
@@ -642,9 +676,9 @@ export default function Header({
                           </p>
                         </div>
                       </div>
-                      <div className="text-right flex items-center gap-2">
+                      <div className="text-right flex items-center gap-2 shrink-0">
                         <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
-                          d.connectivityScore >= 70 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'
+                          d.connectivityScore >= 70 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400'
                         }`}>
                           {d.connectivityScore}% Score
                         </span>
@@ -660,8 +694,8 @@ export default function Header({
             {searchResults.highways.length > 0 && (
               <div className="p-2">
                 <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-purple-400 font-mono flex items-center gap-1.5">
-                  <Route size={11} />
-                  <span>Highways & Road Corridors</span>
+                  <Route size={11} className="shrink-0" />
+                  <span className="min-w-0">Highways & Road Corridors</span>
                 </div>
                 <div className="space-y-1 mt-1">
                   {searchResults.highways.map((h) => (
@@ -674,11 +708,11 @@ export default function Header({
                       })}
                       className="px-3 py-2 rounded-xl hover:bg-[hsl(var(--muted))] cursor-pointer flex items-center justify-between transition-colors group"
                     >
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center font-bold text-xs">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className="w-7 h-7 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center font-bold text-xs shrink-0">
                           {h.type}
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-xs font-bold text-[hsl(var(--foreground))] group-hover:text-purple-400 transition-colors">
                             {h.name} <span className="text-[11px] font-normal text-[hsl(var(--muted-foreground))]">({h.from} ➔ {h.to})</span>
                           </p>
@@ -687,7 +721,7 @@ export default function Header({
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 shrink-0">
                         <span 
                           className="text-[10px] font-bold uppercase px-2 py-0.5 rounded"
                           style={{
@@ -709,8 +743,8 @@ export default function Header({
             {searchResults.vehicles.length > 0 && (
               <div className="p-2">
                 <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-400 font-mono flex items-center gap-1.5">
-                  <Truck size={11} />
-                  <span>GPS Fleet & Cargo Telemetry</span>
+                  <Truck size={11} className="shrink-0" />
+                  <span className="min-w-0">GPS Fleet & Cargo Telemetry</span>
                 </div>
                 <div className="space-y-1 mt-1">
                   {searchResults.vehicles.map((v) => (
@@ -750,8 +784,8 @@ export default function Header({
             {searchResults.alerts.length > 0 && (
               <div className="p-2">
                 <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-rose-400 font-mono flex items-center gap-1.5">
-                  <AlertTriangle size={11} />
-                  <span>Disruption Alerts & Hazards</span>
+                  <AlertTriangle size={11} className="shrink-0" />
+                  <span className="min-w-0">Disruption Alerts & Hazards</span>
                 </div>
                 <div className="space-y-1 mt-1">
                   {searchResults.alerts.map((a) => (
@@ -790,8 +824,8 @@ export default function Header({
             {searchResults.pages.length > 0 && (
               <div className="p-2">
                 <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[hsl(var(--muted-foreground))] font-mono flex items-center gap-1.5">
-                  <Compass size={11} />
-                  <span>Platform Modules</span>
+                  <Compass size={11} className="shrink-0" />
+                  <span className="min-w-0">Platform Modules</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 mt-1">
                   {searchResults.pages.map((p) => (
@@ -900,6 +934,67 @@ export default function Header({
           <span>{timeStr}</span>
         </div>
 
+        {/* Item 8 — Role switcher (Control Room / Field Officer / Driver) */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setRoleMenuOpen((v) => !v)}
+            title="Switch role experience"
+            aria-haspopup="menu"
+            aria-expanded={roleMenuOpen}
+            className={`flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded border text-xs font-medium transition-colors cursor-pointer ${
+              isDark
+                ? 'bg-[#111316] border-[#3a3f47] text-[#FFC107] hover:bg-[#1a1d21]'
+                : 'bg-slate-50 border-slate-300 text-[#0B3D6D] hover:bg-blue-50'
+            }`}
+          >
+            <Shield size={14} />
+            <span className="hidden sm:inline">{roleLabel}</span>
+            <ChevronDown size={13} className={roleMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
+          </button>
+
+          {roleMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setRoleMenuOpen(false)} />
+              <div
+                role="menu"
+                className={`absolute right-0 top-full mt-1.5 z-50 w-64 border shadow-lg ${isDark ? 'bg-[#16181c] border-[#2a2e35]' : 'bg-white border-slate-200'}`}
+              >
+                <div className={`px-3 py-2 text-[9px] font-bold uppercase tracking-wider border-b ${isDark ? 'text-slate-400 border-[#2a2e35]' : 'text-slate-500 border-slate-200'}`}>
+                  Switch role experience
+                </div>
+                {ROLES.filter((r) => r.key !== 'admin').map((r) => (
+                  <button
+                    key={r.key}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      if (!requireAuthAction('Switch role experience')) return;
+                      setRole(r.key);
+                      setRoleMenuOpen(false);
+                      setLocation(ROLE_HOME[r.key] ?? '/');
+                      window.dispatchEvent(new Event('pathly_role_changed'));
+                    }}
+                    className={`w-full text-left px-3 py-2.5 flex items-start gap-2.5 transition-colors cursor-pointer ${
+                      role === r.key
+                        ? isDark ? 'bg-[#23272d] text-[#FFC107]' : 'bg-blue-50 text-[#0B3D6D]'
+                        : isDark ? 'text-slate-200 hover:bg-[#1a1d21]' : 'text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="mt-0.5">
+                      {role === r.key && <Check size={14} className={isDark ? 'text-[#FFC107]' : 'text-[#0B3D6D]'} />}
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold">{r.label}</p>
+                      <p className={`text-[10px] leading-tight mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{r.scope}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
         {/* Network Status Toggle / Indicator */}
         <button
           type="button"
@@ -913,7 +1008,7 @@ export default function Header({
               window.location.reload();
             }
           }}
-          title={isOnline ? "Network Connected (Click to simulate offline)" : "Offline Mode (Click to reconnect online and refresh)"}
+          title={isOnline ? "Network Connected (Click to switch to offline mode)" : "Offline Mode (Click to reconnect online and refresh)"}
           className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded border text-xs font-medium transition-colors cursor-pointer ${
             isOnline
               ? isDark ? "bg-green-900/40 text-green-300 border-green-600" : "bg-green-50 text-green-800 border-green-600 hover:bg-green-100"

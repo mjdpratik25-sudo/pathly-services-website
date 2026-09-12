@@ -1,6 +1,61 @@
 // ============================================================
 // Pathly: Regional Data Models & Mock Data
 // ============================================================
+//
+// DOCUMENTED SCHEMA (Northeast India operational fixture dataset)
+// --------------------------------------------------------------
+// Every dataset below drives the live demo. All geography refers to
+// real NER towns, NHR-identified highways and river systems; only the
+// telemetry values are simulated for the SIH prototype.
+//
+// -- Road network -------------------------------------------------
+//   ROAD_SEGMENTS: RoadSegment[]
+//     id, name, type(NH/SH/district/local), from/to (town names),
+//     from/toLat&Lng (start/end point), distance(km), status(
+//       open|partially_blocked|blocked|under_repair), condition(0-100),
+//     lastUpdated, riskScore(0-100, see Objective-4 model),
+//     terrain(plains|hills|mountains|valley|plateau|riverine),
+//     altitude(m ASL), bridgeCount, trafficCongestion(fluent|moderate|
+//       heavy|jammed), avgSpeedKmH, delayMinutes, laneCount, pavementType
+//
+// -- Hazard datasets ----------------------------------------------
+//   FLOOD_PRONE_ZONES: FloodProneZone[]
+//     id, name, river, states[], districts[], watershedArea(sq km),
+//     dangerLevel(low|moderate|high|extreme), dangerWaterLevel(m),
+//     annualPeakMonths[], historicalMajorFloods[{year,peakLevel,note}],
+//     exposedRoutes[], vulnerableSettlements, embankmentLengthKm,
+//     lastUpdated, activeAdvisory
+//   LANDSLIDE_CORRIDORS: LandslideCorridor[]
+//     id, name, roadSegmentIds[](ref ROAD_SEGMENTS.id), state, districts[],
+//     start/endLat&Lng, corridorLengthKm, slopeMaterial(soil|rock|mixed),
+//     avgSlopeAngleDeg, rainfallTriggerMm, triggers[](rainfall|earthquake|
+//       slope_cut|river_erosion|snowmelt), laharsDebrisFlow,
+//     clearanceResponsible(e.g. 'BRO 42 BRTF'), recentEventCount,
+//     riskScore(0-100), status(watch|advisory|closed), lastUpdated
+//
+// -- Trade network --------------------------------------------------
+//   LOGISTICS_HUBS: LogisticsHub[]
+//     id, name, type(icd|airport|land_port|railhead|fuel_depot|
+//       river_terminal|agri_market|pharma_hub), state, district, city,
+//     lat, lng, capacity, connectedRoads[], nearestMajorRailhead,
+//     status(operational|congested|restricted|critical), congestionLevel,
+//     customsClearedFCL?, iaVerbose(interstate|intrastate)
+//
+// -- Disruption tableau ---------------------------------------------
+//   INITIAL_DISRUPTION_EVENTS: DisruptionEvent[]
+//     id, cause(landslide|flood|bridge_damage|road_subsidence|accident|
+//       blockade|weather), severity, roadSegmentIds[](ref ROAD_SEGMENTS),
+//     routeName, state, location, startedAt, status(active|clearing|
+//       resolved), estimatedClearTimeHours, detourRequired, detourDescription,
+//     impactDelayMinutes, affectedVehicleIds[], impactCargoTypes[]
+//     (consumed by the Objective-6 Emergency Scenario engine)
+//
+// -- Supporting fixtures (existing) --------------------------------
+//   NER_STATES[], NER_DISTRICTS[], VEHICLES[], INITIAL_ALERTS[],
+//   INITIAL_FIELD_REPORTS[], INITIAL_WEATHER[], SUPPLY_CHAIN_METRICS[],
+//   PLATFORM_STATS, MULTILINGUAL_LABELS, NER_LOCALITIES[],
+//   GIS_INFRASTRUCTURE[]
+// --------------------------------------------------------------
 
 // ---- Type Definitions ----
 
@@ -12,7 +67,7 @@ export type RoadStatus = 'open' | 'partially_blocked' | 'blocked' | 'under_repai
 
 export type AlertSeverity = 'critical' | 'warning' | 'info';
 
-export type AlertCategory = 'landslide' | 'flood' | 'road_damage' | 'bridge_closure' | 'traffic' | 'weather' | 'accident';
+export type AlertCategory = 'landslide' | 'flood' | 'road_damage' | 'bridge_closure' | 'traffic' | 'weather' | 'accident' | 'geofence' | 'speeding' | 'route_deviation' | 'unauthorized_stop' | 'telemetry';
 
 export type CargoType = 'medicines' | 'food_supplies' | 'construction' | 'agricultural' | 'fuel' | 'general';
 
@@ -70,6 +125,8 @@ export interface RoadSegment {
   pavementType?: string;
 }
 
+export type GpsSource = 'simulator' | 'driver_mobile' | 'real';
+
 export interface Vehicle {
   id: string;
   orderToken: string;
@@ -93,6 +150,19 @@ export interface Vehicle {
   progress: number; // 0-100
   fuelLevel: number; // percentage
   priority: 'normal' | 'high' | 'emergency';
+  // Live GPS pipeline additions (real values from the backend when synced)
+  source?: GpsSource;
+  sourceLabel?: string;
+  telemetryStatus?: 'moving' | 'idle' | 'stopped' | 'offline';
+  signalAgeMs?: number;
+  distanceTripKm?: number;
+  lastSignalAt?: string; // ISO timestamp of last server ping
+}
+
+export function gpsSourceLabel(source: GpsSource | undefined): string {
+  if (source === 'driver_mobile') return 'Driver Mobile Location';
+  if (source === 'real') return 'Real GPS Device';
+  return 'Vehicle Stream (Field Telemetry)';
 }
 
 export interface LogisticsAlert {
@@ -113,6 +183,9 @@ export interface LogisticsAlert {
   isActive: boolean;
   acknowledged: boolean;
   photoUrl?: string;
+  // Live GPS pipeline additions (source tag on server-generated alerts)
+  source?: GpsSource;
+  sourceLabel?: string;
 }
 
 export interface FieldReport {
@@ -128,11 +201,17 @@ export interface FieldReport {
   title: string;
   description: string;
   photoAttached: boolean;
-  timestamp: string;
+  photoDataUrl?: string;          // camera-captured thumbnail
+  photoName?: string;             // original filename
+  timestamp: string;              // human-friendly label
+  updatedAt?: string;             // ISO wall-clock for conflict resolution
   status: ReportStatus;
   syncStatus: 'synced' | 'pending' | 'failed';
   verifiedBy?: string;
   actionNote?: string;
+  attempts?: number;              // sync retry count
+  lastAttemptAt?: string;         // ISO timestamp of last retry
+  serverSyncedAt?: string;        // ISO timestamp of backend acknowledgment
 }
 
 export interface WeatherData {
@@ -167,6 +246,97 @@ export interface SupplyChainMetric {
   onTimeRate: number; // percentage
 }
 
+// ---- Northeast India hazard / logistics network schema (Objective 3) ----
+
+export type FloodHazardLevel = 'low' | 'moderate' | 'high' | 'extreme';
+
+export interface FloodProneZone {
+  id: string;
+  name: string; // e.g. 'Brahmaputra Valley — Central Reach'
+  river: string; // primary river system
+  states: NERState[];
+  districts: string[]; // most exposed district names
+  watershedArea: number; // sq km
+  dangerLevel: FloodHazardLevel;
+  dangerWaterLevel: number; // meters, gauge reading that triggers a warning
+  annualPeakMonths: string[]; // e.g. ['June', 'July', 'August']
+  historicalMajorFloods: { year: number; peakLevel: number; note: string }[];
+  exposedRoutes: string[]; // RoadSegment.name values at risk
+  vulnerableSettlements: number;
+  embankmentLengthKm: number; // existing flood embankments
+  lastUpdated: string;
+  activeAdvisory: boolean;
+}
+
+export type LandslideTrigger = 'rainfall' | 'earthquake' | 'slope_cut' | 'river_erosion' | 'snowmelt';
+
+export interface LandslideCorridor {
+  id: string;
+  name: string; // e.g. 'NH-44 Umiam–Umling cut slope section'
+  roadSegmentIds: string[]; // RoadSegment.id values
+  state: NERState;
+  districts: string[];
+  startLat: number;
+  startLng: number;
+  endLat: number;
+  endLng: number;
+  corridorLengthKm: number;
+  slopeMaterial: 'soil' | 'rock' | 'mixed';
+  avgSlopeAngleDeg: number;
+  rainfallTriggerMm: number; // 24h rainfall that elevates risk
+  triggers: LandslideTrigger[];
+  laharsDebrisFlow: boolean;
+  clearanceResponsible: string; // e.g. 'BRO 42 BRTF'
+  recentEventCount: number; // events in last 5 years
+  riskScore: number; // 0-100 current
+  status: 'watch' | 'advisory' | 'closed';
+  lastUpdated: string;
+}
+
+export type HubType = 'icd' | 'airport' | 'land_port' | 'railhead' | 'fuel_depot' | 'river_terminal' | 'agri_market' | 'pharma_hub';
+
+export interface LogisticsHub {
+  id: string;
+  name: string;
+  type: HubType;
+  state: NERState;
+  district: string;
+  city: string;
+  lat: number;
+  lng: number;
+  capacity: string; // e.g. '12,000 TEU / yr'
+  connectedRoads: string[]; // road names / corridors
+  nearestMajorRailhead: string;
+  status: 'operational' | 'congested' | 'restricted' | 'critical';
+  congestionLevel: number; // 0-100
+  customsClearedFCL?: boolean;
+  iaVerbose: 'interstate' | 'intrastate';
+}
+
+export type DisruptionCause = 'landslide' | 'flood' | 'bridge_damage' | 'road_subsidence' | 'accident' | 'blockade' | 'weather';
+
+export interface DisruptionEvent {
+  id: string;
+  cause: DisruptionCause;
+  severity: AlertSeverity;
+  roadSegmentIds: string[]; // RoadSegment.id values affected
+  routeName: string; // human-readable corridor
+  state: NERState;
+  location: string;
+  startedAt: string; // ISO or display string (fixture keeps it readable)
+  status: 'active' | 'clearing' | 'resolved';
+  estimatedClearTimeHours: number;
+  detourRequired: boolean;
+  detourDescription?: string;
+  impactDelayMinutes: number;
+  affectedVehicleIds: string[]; // Vehicle.id values
+  impactCargoTypes: CargoType[];
+  /** Scenario-drill replay profile for the /scenario console (how the incident trends). */
+  outcome?: 'on_time' | 'delayed' | 'escalated' | 'reroute_failed' | 'reopened' | 'unresolved';
+  /** Effective clearance hours for outcome 'delayed' (overrides estimatedClearTimeHours). */
+  actualClearTimeHours?: number;
+}
+
 // ---- NER States Data ----
 
 export const NER_STATES: { name: NERState; capital: string; emoji: string; lat: number; lng: number }[] = [
@@ -186,6 +356,7 @@ export const NER_DISTRICTS: NERDistrict[] = [
   // Assam
   { id: 'AS-KAM', name: 'Kamrup Metropolitan', state: 'Assam', lat: 26.1445, lng: 91.7362, elevation: 55, terrain: 'plains', population: 1253938, area: 1528, connectivityScore: 92, connectivityStatus: 'excellent', majorTown: 'Guwahati', nhConnected: ['NH-27', 'NH-37'], railConnected: true, airportNearby: true, floodRisk: 'medium', landslideRisk: 'low', avgRainfall: 1722 },
   { id: 'AS-NAG', name: 'Nagaon', state: 'Assam', lat: 26.3500, lng: 92.6833, elevation: 70, terrain: 'plains', population: 2823768, area: 3831, connectivityScore: 78, connectivityStatus: 'good', majorTown: 'Nagaon', nhConnected: ['NH-37'], railConnected: true, airportNearby: false, floodRisk: 'high', landslideRisk: 'low', avgRainfall: 1850 },
+  { id: 'AS-SON', name: 'Sonitpur', state: 'Assam', lat: 26.6332, lng: 92.7928, elevation: 85, terrain: 'plains', population: 1923978, area: 5324, connectivityScore: 76, connectivityStatus: 'good', majorTown: 'Tezpur', nhConnected: ['NH-27', 'NH-13', 'NH-37'], railConnected: true, airportNearby: false, floodRisk: 'medium', landslideRisk: 'low', avgRainfall: 2100 },
   { id: 'AS-DIB', name: 'Dibrugarh', state: 'Assam', lat: 27.4728, lng: 94.9120, elevation: 108, terrain: 'plains', population: 1327748, area: 3381, connectivityScore: 82, connectivityStatus: 'good', majorTown: 'Dibrugarh', nhConnected: ['NH-37', 'NH-15'], railConnected: true, airportNearby: true, floodRisk: 'high', landslideRisk: 'low', avgRainfall: 2400 },
   { id: 'AS-SIL', name: 'Cachar', state: 'Assam', lat: 24.8333, lng: 92.7789, elevation: 22, terrain: 'valley', population: 1736617, area: 3786, connectivityScore: 72, connectivityStatus: 'good', majorTown: 'Silchar', nhConnected: ['NH-6'], railConnected: true, airportNearby: true, floodRisk: 'high', landslideRisk: 'medium', avgRainfall: 2800 },
   { id: 'AS-JOR', name: 'Jorhat', state: 'Assam', lat: 26.7509, lng: 94.2037, elevation: 116, terrain: 'plains', population: 1092256, area: 2851, connectivityScore: 80, connectivityStatus: 'good', majorTown: 'Jorhat', nhConnected: ['NH-37'], railConnected: true, airportNearby: true, floodRisk: 'medium', landslideRisk: 'low', avgRainfall: 2100 },
@@ -235,7 +406,20 @@ export const ROAD_SEGMENTS: RoadSegment[] = [
   { id: 'NH10-SIL-GAN', name: 'NH-10 Siliguri–Gangtok', type: 'NH', from: 'Siliguri', to: 'Gangtok', fromLat: 26.7271, fromLng: 88.3953, toLat: 27.3389, toLng: 88.6065, distance: 124, status: 'partially_blocked', condition: 48, lastUpdated: '1 hour ago', riskScore: 70, terrain: 'mountains', altitude: 1200, bridgeCount: 14, trafficCongestion: 'heavy', avgSpeedKmH: 20, delayMinutes: 50, laneCount: 2, pavementType: 'Teesta Gorge Hill Corridor' },
   { id: 'NH44-SHI-AGT', name: 'NH-44 Shillong–Agartala', type: 'NH', from: 'Shillong', to: 'Agartala', fromLat: 25.5788, fromLng: 91.8933, toLat: 23.8315, toLng: 91.2868, distance: 336, status: 'open', condition: 65, lastUpdated: '2 hours ago', riskScore: 45, terrain: 'hills', altitude: 400, bridgeCount: 22, trafficCongestion: 'fluent', avgSpeedKmH: 52, delayMinutes: 10, laneCount: 2, pavementType: 'National Highway' },
   { id: 'NH13-TWA-TEZ', name: 'NH-13 Tawang–Tezpur', type: 'NH', from: 'Tawang', to: 'Itanagar', fromLat: 27.5860, fromLng: 91.8600, toLat: 27.0844, toLng: 93.6053, distance: 345, status: 'blocked', condition: 10, lastUpdated: '15 mins ago', riskScore: 98, terrain: 'mountains', altitude: 3000, bridgeCount: 24, trafficCongestion: 'jammed', avgSpeedKmH: 0, delayMinutes: 300, laneCount: 1, pavementType: 'Trans-Arunachal Highway (Sela Pass Snow/Slide)' },
-  { id: 'NH37-GUW-SIL', name: 'NH-37 Guwahati–Silchar', type: 'NH', from: 'Guwahati', to: 'Silchar', fromLat: 26.1445, fromLng: 91.7362, toLat: 24.8333, toLng: 92.7789, distance: 340, status: 'open', condition: 70, lastUpdated: '3 hours ago', riskScore: 38, terrain: 'valley', altitude: 50, bridgeCount: 15, trafficCongestion: 'moderate', avgSpeedKmH: 45, delayMinutes: 15, laneCount: 2, pavementType: 'National Highway Corridor' }
+  { id: 'NH37-GUW-SIL', name: 'NH-37 Guwahati–Silchar', type: 'NH', from: 'Guwahati', to: 'Silchar', fromLat: 26.1445, fromLng: 91.7362, toLat: 24.8333, toLng: 92.7789, distance: 340, status: 'open', condition: 70, lastUpdated: '3 hours ago', riskScore: 38, terrain: 'valley', altitude: 50, bridgeCount: 15, trafficCongestion: 'moderate', avgSpeedKmH: 45, delayMinutes: 15, laneCount: 2, pavementType: 'National Highway Corridor' },
+  // ---- Item 3: graph-connectivity enrichment (real NER highways, so the route engine
+  //      can search an actual connected network instead of treating every pair as isolated) ----
+  { id: 'NH27-GUW-DIM', name: 'NH-27 Guwahati–Dimapur', type: 'NH', from: 'Guwahati', to: 'Dimapur', fromLat: 26.1445, fromLng: 91.7362, toLat: 25.9000, toLng: 93.7333, distance: 280, status: 'open', condition: 75, lastUpdated: '1 hour ago', riskScore: 34, terrain: 'plains', altitude: 90, bridgeCount: 12, trafficCongestion: 'fluent', avgSpeedKmH: 62, delayMinutes: 8, laneCount: 4, pavementType: '4-Lane National Highway' },
+  { id: 'NH37-GUW-TEZ', name: 'NH-37 Guwahati–Tezpur', type: 'NH', from: 'Guwahati', to: 'Tezpur', fromLat: 26.1445, fromLng: 91.7362, toLat: 26.6332, toLng: 92.7928, distance: 192, status: 'open', condition: 74, lastUpdated: '30 mins ago', riskScore: 30, terrain: 'plains', altitude: 150, bridgeCount: 9, trafficCongestion: 'fluent', avgSpeedKmH: 60, delayMinutes: 5, laneCount: 2, pavementType: 'National Highway Corridor' },
+  { id: 'NH27-TEZ-NAG', name: 'NH-27 Tezpur–Nagaon', type: 'NH', from: 'Tezpur', to: 'Nagaon', fromLat: 26.6332, fromLng: 92.7928, toLat: 26.3500, toLng: 92.6833, distance: 75, status: 'open', condition: 71, lastUpdated: '1 hour ago', riskScore: 28, terrain: 'plains', altitude: 90, bridgeCount: 4, trafficCongestion: 'fluent', avgSpeedKmH: 58, delayMinutes: 3, laneCount: 2, pavementType: 'National Highway' },
+  { id: 'NH6-SIL-SHI', name: 'NH-6 Shillong–Silchar', type: 'NH', from: 'Shillong', to: 'Silchar', fromLat: 25.5788, fromLng: 91.8933, toLat: 24.8333, toLng: 92.7789, distance: 220, status: 'partially_blocked', condition: 58, lastUpdated: '2 hours ago', riskScore: 58, terrain: 'hills', altitude: 500, bridgeCount: 11, trafficCongestion: 'moderate', avgSpeedKmH: 32, delayMinutes: 25, laneCount: 2, pavementType: 'Hill Highway (NH-6)' },
+  { id: 'NH2-SIL-IMP', name: 'NH-2 Silchar–Imphal', type: 'NH', from: 'Silchar', to: 'Imphal', fromLat: 24.8333, fromLng: 92.7789, toLat: 24.8170, toLng: 93.9368, distance: 185, status: 'open', condition: 62, lastUpdated: '2 hours ago', riskScore: 52, terrain: 'hills', altitude: 550, bridgeCount: 9, trafficCongestion: 'moderate', avgSpeedKmH: 38, delayMinutes: 18, laneCount: 2, pavementType: 'National Highway (AH-1)' },
+  { id: 'NH2-KOH-IMP', name: 'NH-2 Kohima–Imphal', type: 'NH', from: 'Kohima', to: 'Imphal', fromLat: 25.6751, fromLng: 94.1086, toLat: 24.8170, toLng: 93.9368, distance: 135, status: 'open', condition: 55, lastUpdated: '1 hour ago', riskScore: 62, terrain: 'mountains', altitude: 1100, bridgeCount: 8, trafficCongestion: 'heavy', avgSpeedKmH: 30, delayMinutes: 30, laneCount: 2, pavementType: 'Mountain Highway (NH-2)' },
+  { id: 'NH13-TEZ-ITA', name: 'NH-13 Tezpur–Itanagar', type: 'NH', from: 'Tezpur', to: 'Itanagar', fromLat: 26.6332, fromLng: 92.7928, toLat: 27.0844, toLng: 93.6053, distance: 165, status: 'open', condition: 66, lastUpdated: '2 hours ago', riskScore: 48, terrain: 'hills', altitude: 320, bridgeCount: 7, trafficCongestion: 'moderate', avgSpeedKmH: 42, delayMinutes: 12, laneCount: 2, pavementType: 'Trans-Arunachal Highway (NH-13)' },
+  { id: 'NH51-GUW-TUR', name: 'NH-51 Guwahati–Tura', type: 'NH', from: 'Guwahati', to: 'Tura', fromLat: 26.1445, fromLng: 91.7362, toLat: 25.5167, toLng: 90.2333, distance: 210, status: 'open', condition: 60, lastUpdated: '3 hours ago', riskScore: 50, terrain: 'hills', altitude: 280, bridgeCount: 6, trafficCongestion: 'fluent', avgSpeedKmH: 44, delayMinutes: 10, laneCount: 2, pavementType: 'National Highway (NH-51)' },
+  { id: 'NH106-SHI-NON', name: 'NH-106 Shillong–Nongstoin', type: 'NH', from: 'Shillong', to: 'Nongstoin', fromLat: 25.5788, fromLng: 91.8933, toLat: 25.5000, toLng: 91.2833, distance: 96, status: 'partially_blocked', condition: 48, lastUpdated: '1 hour ago', riskScore: 66, terrain: 'hills', altitude: 1050, bridgeCount: 5, trafficCongestion: 'heavy', avgSpeedKmH: 24, delayMinutes: 35, laneCount: 1, pavementType: 'Hill Highway (NH-106)' },
+  { id: 'NH54-AIZ-LUN', name: 'NH-54 Aizawl–Lunglei', type: 'NH', from: 'Aizawl', to: 'Lunglei', fromLat: 23.7271, fromLng: 92.7176, toLat: 22.8833, toLng: 92.7333, distance: 158, status: 'open', condition: 52, lastUpdated: '2 hours ago', riskScore: 60, terrain: 'hills', altitude: 900, bridgeCount: 10, trafficCongestion: 'moderate', avgSpeedKmH: 36, delayMinutes: 20, laneCount: 2, pavementType: 'Hill Highway (NH-54)' },
+  { id: 'NH15-DIB-TIN', name: 'NH-15 Dibrugarh–Tinsukia', type: 'NH', from: 'Dibrugarh', to: 'Tinsukia', fromLat: 27.4728, fromLng: 94.9120, toLat: 27.5000, toLng: 95.3667, distance: 52, status: 'open', condition: 68, lastUpdated: '1 hour ago', riskScore: 32, terrain: 'plains', altitude: 120, bridgeCount: 3, trafficCongestion: 'fluent', avgSpeedKmH: 55, delayMinutes: 5, laneCount: 2, pavementType: 'National Highway (NH-15)' }
 ];
 
 // ---- Vehicle Fleet ----
@@ -293,6 +477,337 @@ export const INITIAL_WEATHER: WeatherData[] = [
   { district: 'South Sikkim', state: 'Sikkim', temperature: 15, humidity: 90, rainfall: 72, windSpeed: 26, windGust: 42, condition: 'heavy_rain', visibility: 3, visibilityNote: '3 km, very poor through Teesta gorge', riverLevel: 'Teesta river at 1.5m above danger mark', forecast24h: 'Heavy rain. Road advisory for NH-10 through Teesta gorge.', description: 'Heavy rain over South Sikkim with the Teesta in spate. Multiple mudslide and rock-fall advisories issued along NH-10 through the gorge.', affectedSettlements: 'Approx. 11 villages and 2 suspension-bridge crossings', recommendedAction: 'Avoid NH-10 between Namchi and the gorge until BRO slope inspection clears the corridor.', lastUpdated: 'Updated 4 min ago', floodWarning: false, landslideWarning: true },
   { district: 'Karbi Anglong', state: 'Assam', temperature: 29, humidity: 71, rainfall: 5, windSpeed: 9, windGust: 15, condition: 'clear', visibility: 12, visibilityNote: '12 km, excellent across hill-plain transition', forecast24h: 'Clear skies expected. No warning.', description: 'Clear skies and dry conditions across Karbi Anglong. No active threat; good visibility for cargo movement on interior hill roads.', affectedSettlements: 'No active advisory', recommendedAction: 'Normal operations; regular route monitoring continues.', lastUpdated: 'Updated 18 min ago', floodWarning: false, landslideWarning: false },
   { district: 'Ri Bhoi', state: 'Meghalaya', temperature: 23, humidity: 84, rainfall: 48, windSpeed: 24, windGust: 40, condition: 'rain', visibility: 4, visibilityNote: '4 km, very poor on NH-40 approach cuts', riverLevel: 'Umiam reservoir at normal operating level', forecast24h: 'Thunderstorm activity expected. Landslide watch on hill cuts.', description: 'Scattered thunderstorm activity across Ri Bhoi with periods of intense rain. A precautionary landslide watch is in effect on cut slopes along NH-40.', affectedSettlements: 'Approx. 6 villages near Nongpoh and Umiam approach', recommendedAction: 'Monitor NH-40 slope cuttings; no movement restriction yet, but avoid stopping under unstable cuts.', lastUpdated: 'Updated 6 min ago', floodWarning: false, landslideWarning: true }
+];
+
+// ---- Flood-Prone Zones (Objective 3) ----
+
+export const FLOOD_PRONE_ZONES: FloodProneZone[] = [
+  {
+    id: 'FLOOD-BRHM-CENTRAL',
+    name: 'Brahmaputra Valley — Central Reach',
+    river: 'Brahmaputra',
+    states: ['Assam'],
+    districts: ['Nagaon', 'Dibrugarh', 'Karbi Anglong', 'Kamrup Metropolitan'],
+    watershedArea: 61500,
+    dangerLevel: 'extreme',
+    dangerWaterLevel: 49.5,
+    annualPeakMonths: ['May', 'June', 'July', 'August'],
+    historicalMajorFloods: [
+      { year: 2022, peakLevel: 50.1, note: 'Nagaon-Kampur belt inundated, NH-37 waterlogged' },
+      { year: 2016, peakLevel: 49.8, note: 'Brahmaputra breached embankments near Dibrugarh' },
+      { year: 2004, peakLevel: 51.2, note: 'Major flood, Kaziranga buffer zones submerged' }
+    ],
+    exposedRoutes: ['NH-37 Nagaon–Jorhat', 'NH-27 Nagaon–Jorhat', 'NH-37 Guwahati–Silchar'],
+    vulnerableSettlements: 48,
+    embankmentLengthKm: 215,
+    lastUpdated: 'Updated 4 min ago',
+    activeAdvisory: true
+  },
+  {
+    id: 'FLOOD-BARAK',
+    name: 'Barak Valley — Upper Reach',
+    river: 'Barak',
+    states: ['Assam'],
+    districts: ['Cachar', 'Hailakandi', 'Karimganj'],
+    watershedArea: 8200,
+    dangerLevel: 'high',
+    dangerWaterLevel: 16.8,
+    annualPeakMonths: ['June', 'July', 'August', 'September'],
+    historicalMajorFloods: [
+      { year: 2020, peakLevel: 18.1, note: 'Silchar town inundated for 5 days' },
+      { year: 2019, peakLevel: 17.6, note: 'NH-6 Silchar bypass flooded' }
+    ],
+    exposedRoutes: ['NH-6 Silchar–Aizawl', 'NH-37 Guwahati–Silchar'],
+    vulnerableSettlements: 26,
+    embankmentLengthKm: 96,
+    lastUpdated: 'Updated 11 min ago',
+    activeAdvisory: true
+  },
+  {
+    id: 'FLOOD-TEESTA',
+    name: 'Teesta – Tista Valley Corridor',
+    river: 'Teesta',
+    states: ['Sikkim'],
+    districts: ['South Sikkim', 'East Sikkim'],
+    watershedArea: 12600,
+    dangerLevel: 'high',
+    dangerWaterLevel: 9.4,
+    annualPeakMonths: ['June', 'July', 'August'],
+    historicalMajorFloods: [
+      { year: 2023, peakLevel: 11.2, note: 'Glacial outburst (South Lhonak) — Teesta spate, NH-10 UXO' },
+      { year: 2013, peakLevel: 10.4, note: 'Movement restricted through Teesta gorge' }
+    ],
+    exposedRoutes: ['NH-10 Siliguri–Gangtok'],
+    vulnerableSettlements: 11,
+    embankmentLengthKm: 0,
+    lastUpdated: 'Updated 8 min ago',
+    activeAdvisory: true
+  },
+  {
+    id: 'FLOOD-SIANG-BRAHMAPUTRA',
+    name: 'Siang River — Arunachal Foothills',
+    river: 'Siang (Brahmaputra tributary)',
+    states: ['Arunachal Pradesh'],
+    districts: ['Papum Pare', 'East Siang'],
+    watershedArea: 15900,
+    dangerLevel: 'high',
+    dangerWaterLevel: 11.8,
+    annualPeakMonths: ['June', 'July', 'August'],
+    historicalMajorFloods: [
+      { year: 2021, peakLevel: 12.9, note: 'NH-415 approached by floodwater at Banderdewa' }
+    ],
+    exposedRoutes: ['NH-415 Itanagar–Ziro', 'NH-13 Tawang–Tezpur'],
+    vulnerableSettlements: 16,
+    embankmentLengthKm: 0,
+    lastUpdated: 'Updated 6 min ago',
+    activeAdvisory: true
+  }
+];
+
+// ---- Landslide Corridors (Objective 3) ----
+
+export const LANDSLIDE_CORRIDORS: LandslideCorridor[] = [
+  {
+    id: 'LSL-NH44-UMIAM',
+    name: 'NH-44 Umiam–Umling cut slope section',
+    roadSegmentIds: ['NH44-GUW-SHI'],
+    state: 'Meghalaya',
+    districts: ['East Khasi Hills'],
+    startLat: 25.62,
+    startLng: 91.85,
+    endLat: 25.55,
+    endLng: 91.93,
+    corridorLengthKm: 18,
+    slopeMaterial: 'mixed',
+    avgSlopeAngleDeg: 38,
+    rainfallTriggerMm: 90,
+    triggers: ['rainfall', 'slope_cut'],
+    laharsDebrisFlow: true,
+    clearanceResponsible: 'BRO 42 BRTF / Meghalaya PWD',
+    recentEventCount: 7,
+    riskScore: 78,
+    status: 'advisory',
+    lastUpdated: 'Updated 5 min ago'
+  },
+  {
+    id: 'LSL-NH2-KANGPOKPI',
+    name: 'NH-2 Kangpokpi–Senapati subsidence belt',
+    roadSegmentIds: ['NH2-IMP-MOR'],
+    state: 'Manipur',
+    districts: ['Imphal West', 'Kangpokpi'],
+    startLat: 25.02,
+    startLng: 93.95,
+    endLat: 25.33,
+    endLng: 94.10,
+    corridorLengthKm: 41,
+    slopeMaterial: 'soil',
+    avgSlopeAngleDeg: 29,
+    rainfallTriggerMm: 70,
+    triggers: ['rainfall', 'slope_cut'],
+    laharsDebrisFlow: false,
+    clearanceResponsible: 'PWD Manipur',
+    recentEventCount: 5,
+    riskScore: 92,
+    status: 'closed',
+    lastUpdated: 'Updated 3 min ago'
+  },
+  {
+    id: 'LSL-NH415-BANDERDEWA',
+    name: 'NH-415 Banderdewa–Doimukh hill cut',
+    roadSegmentIds: ['NH415-ITA-ZIR'],
+    state: 'Arunachal Pradesh',
+    districts: ['Papum Pare'],
+    startLat: 27.06,
+    startLng: 93.58,
+    endLat: 27.13,
+    endLng: 93.62,
+    corridorLengthKm: 9,
+    slopeMaterial: 'mixed',
+    avgSlopeAngleDeg: 42,
+    rainfallTriggerMm: 110,
+    triggers: ['rainfall', 'river_erosion'],
+    laharsDebrisFlow: true,
+    clearanceResponsible: 'BRO 42 BRTF',
+    recentEventCount: 4,
+    riskScore: 85,
+    status: 'advisory',
+    lastUpdated: 'Updated 2 min ago'
+  },
+  {
+    id: 'LSL-NH10-GORGE',
+    name: 'NH-10 Teesta Gorge — Namchi section',
+    roadSegmentIds: ['NH10-SIL-GAN'],
+    state: 'Sikkim',
+    districts: ['South Sikkim'],
+    startLat: 27.18,
+    startLng: 88.46,
+    endLat: 27.24,
+    endLng: 88.52,
+    corridorLengthKm: 14,
+    slopeMaterial: 'rock',
+    avgSlopeAngleDeg: 55,
+    rainfallTriggerMm: 65,
+    triggers: ['rainfall', 'snowmelt', 'earthquake'],
+    laharsDebrisFlow: true,
+    clearanceResponsible: 'BRO Project Shivashakti',
+    recentEventCount: 9,
+    riskScore: 75,
+    status: 'advisory',
+    lastUpdated: 'Updated 4 min ago'
+  },
+  {
+    id: 'LSL-SELA-PASS',
+    name: 'Sela Pass — Trans-Arunachal highway snow/slide corridor',
+    roadSegmentIds: ['NH13-TWA-TEZ'],
+    state: 'Arunachal Pradesh',
+    districts: ['West Kameng', 'Tawang'],
+    startLat: 27.42,
+    startLng: 92.03,
+    endLat: 27.51,
+    endLng: 92.11,
+    corridorLengthKm: 22,
+    slopeMaterial: 'mixed',
+    avgSlopeAngleDeg: 47,
+    rainfallTriggerMm: 40,
+    triggers: ['snowmelt', 'rainfall'],
+    laharsDebrisFlow: false,
+    clearanceResponsible: 'BRO Vartak',
+    recentEventCount: 6,
+    riskScore: 98,
+    status: 'closed',
+    lastUpdated: 'Updated 15 min ago'
+  }
+];
+
+// ---- Logistics Hubs (Objective 3) ----
+
+export const LOGISTICS_HUBS: LogisticsHub[] = [
+  { id: 'HUB-ICD-GUW', name: 'ICD Guwahati (Amingaon)', type: 'icd', state: 'Assam', district: 'Kamrup', city: 'Guwahati', lat: 26.14, lng: 91.70, capacity: '28,000 TEU / yr', connectedRoads: ['NH-27', 'NH-37'], nearestMajorRailhead: 'Amingaon Rail Yard', status: 'operational', congestionLevel: 45, customsClearedFCL: true, iaVerbose: 'interstate' },
+  { id: 'HUB-AIR-GUW', name: 'LGBI Airport Air Cargo Complex', type: 'airport', state: 'Assam', district: 'Kamrup Metropolitan', city: 'Guwahati', lat: 26.11, lng: 91.59, capacity: '60,000 t / yr', connectedRoads: ['NH-27'], nearestMajorRailhead: 'Amingaon Rail Yard', status: 'operational', congestionLevel: 38, iaVerbose: 'interstate' },
+  { id: 'HUB-LP-DAWKI', name: 'Dawki Integrated Land Port', type: 'land_port', state: 'Meghalaya', district: 'East Khasi Hills', city: 'Dawki', lat: 25.19, lng: 92.02, capacity: '1,500 trucks / day', connectedRoads: ['NH-44 Shillong–Dawki'], nearestMajorRailhead: 'Guwahati (270 km)', status: 'congested', congestionLevel: 78, customsClearedFCL: true, iaVerbose: 'interstate' },
+  { id: 'HUB-AIR-AGAR', name: 'MBB Airport Cargo Terminal', type: 'airport', state: 'Tripura', district: 'West Tripura', city: 'Agartala', lat: 23.89, lng: 91.24, capacity: '18,000 t / yr', connectedRoads: ['NH-44 Shillong–Agartala'], nearestMajorRailhead: 'Agartala Rail Station', status: 'operational', congestionLevel: 30, iaVerbose: 'interstate' },
+  { id: 'HUB-LP-AGAR', name: 'Agartala–Akhaura Land Port', type: 'land_port', state: 'Tripura', district: 'West Tripura', city: 'Agartala', lat: 23.85, lng: 91.27, capacity: '900 trucks / day', connectedRoads: ['NH-44 Shillong–Agartala'], nearestMajorRailhead: 'Agartala Rail Station', status: 'operational', congestionLevel: 52, customsClearedFCL: true, iaVerbose: 'interstate' },
+  { id: 'HUB-FUEL-NUMALIGARH', name: 'Numaligarh Refinery Logistics Terminal', type: 'fuel_depot', state: 'Assam', district: 'Golaghat', city: 'Numaligarh', lat: 26.63, lng: 93.77, capacity: '3,000 KL / day', connectedRoads: ['NH-37', 'NH-27'], nearestMajorRailhead: 'Numaligarh Rail Siding', status: 'operational', congestionLevel: 40, iaVerbose: 'intrastate' },
+  { id: 'HUB-ICD-IMP', name: 'Jiribam–Imphal Multi-Modal Corridor Terminal', type: 'icd', state: 'Manipur', district: 'Imphal West', city: 'Imphal', lat: 24.82, lng: 93.94, capacity: '12,000 TEU / yr', connectedRoads: ['NH-2 Imphal–Moreh'], nearestMajorRailhead: 'Jiribam Railhead (160 km)', status: 'congested', congestionLevel: 66, customsClearedFCL: true, iaVerbose: 'interstate' },
+  { id: 'HUB-RIVER-PANDU', name: 'Pandu Inland Water Terminal', type: 'river_terminal', state: 'Assam', district: 'Kamrup Metropolitan', city: 'Guwahati', lat: 26.18, lng: 91.70, capacity: '200 barges / month', connectedRoads: ['NH-27'], nearestMajorRailhead: 'Kamakhya Rail Station', status: 'restricted', congestionLevel: 71, iaVerbose: 'intrastate' },
+  { id: 'HUB-LP-MOREH', name: 'Moreh Land Port (India–Myanmar)', type: 'land_port', state: 'Manipur', district: 'Tengnoupal', city: 'Moreh', lat: 24.25, lng: 94.30, capacity: '600 trucks / day', connectedRoads: ['NH-2 Imphal–Moreh'], nearestMajorRailhead: 'Silchar Railhead (327 km)', status: 'critical', congestionLevel: 88, customsClearedFCL: true, iaVerbose: 'interstate' },
+  { id: 'HUB-AGRI-LBUM', name: 'Lbum Chilli-Cum-Spice Agri Market', type: 'agri_market', state: 'Nagaland', district: 'Dimapur', city: 'Dimapur', lat: 25.90, lng: 93.73, capacity: '800 t / season', connectedRoads: ['NH-29 Dimapur–Kohima'], nearestMajorRailhead: 'Dimapur Rail Station', status: 'operational', congestionLevel: 34, iaVerbose: 'intrastate' },
+  { id: 'HUB-DEPOT-DIB', name: 'Dibrugarh Fuel & Ambulance Depot', type: 'fuel_depot', state: 'Assam', district: 'Dibrugarh', city: 'Dibrugarh', lat: 27.47, lng: 94.91, capacity: '1,200 KL / day', connectedRoads: ['NH-37 Jorhat–Dibrugarh'], nearestMajorRailhead: 'Dibrugarh Rail Station', status: 'operational', congestionLevel: 32, iaVerbose: 'intrastate' },
+  { id: 'HUB-PHARMA-TEZ', name: 'Tezpur Medical Logistics Node', type: 'pharma_hub', state: 'Assam', district: 'Sonitpur', city: 'Tezpur', lat: 26.63, lng: 92.79, capacity: '40,000 cold-chain packs', connectedRoads: ['NH-27 Nagaon–Jorhat', 'NH-13 Tawang–Tezpur'], nearestMajorRailhead: 'Tezpur Rail Station', status: 'operational', congestionLevel: 28, iaVerbose: 'intrastate' },
+  { id: 'HUB-ICD-ALZ', name: 'Aizawl ICD (Tipaimukh corridor)', type: 'icd', state: 'Mizoram', district: 'Aizawl', city: 'Aizawl', lat: 23.73, lng: 92.72, capacity: '6,000 TEU / yr', connectedRoads: ['NH-6 Silchar–Aizawl'], nearestMajorRailhead: 'Silchar Railhead', status: 'operational', congestionLevel: 49, iaVerbose: 'interstate' }
+];
+
+// ---- Sample Disruption Events (Objective 3, consumed by Objective 6 scenario) ----
+
+export const INITIAL_DISRUPTION_EVENTS: DisruptionEvent[] = [
+  {
+    id: 'DISP-001',
+    cause: 'landslide',
+    severity: 'critical',
+    roadSegmentIds: ['NH44-GUW-SHI'],
+    routeName: 'NH-44 Guwahati–Shillong',
+    state: 'Meghalaya',
+    location: 'km 42 near Umiam',
+    startedAt: 'Today · 05:40 IST',
+    status: 'active',
+    estimatedClearTimeHours: 18,
+    detourRequired: true,
+    detourDescription: 'Divert via NH-37 to Nagaon, then NH-27 to Jorhat, then NH-715 to Shillong',
+    impactDelayMinutes: 120,
+    affectedVehicleIds: ['NER-V001'],
+    impactCargoTypes: ['medicines', 'food_supplies'],
+    outcome: 'on_time'
+  },
+  {
+    id: 'DISP-002',
+    cause: 'flood',
+    severity: 'critical',
+    roadSegmentIds: ['NH37-NAG-JOR'],
+    routeName: 'NH-37 Nagaon–Jorhat',
+    state: 'Assam',
+    location: 'Kampur bypass, Kolong tributary',
+    startedAt: 'Today · 04:15 IST',
+    status: 'active',
+    estimatedClearTimeHours: 48,
+    detourRequired: true,
+    detourDescription: 'Divert via NH-27 (new alignment) through Karbi Anglong',
+    impactDelayMinutes: 90,
+    affectedVehicleIds: ['NER-V010'],
+    impactCargoTypes: ['general'],
+    outcome: 'delayed',
+    actualClearTimeHours: 72
+  },
+  {
+    id: 'DISP-003',
+    cause: 'bridge_damage',
+    severity: 'warning',
+    roadSegmentIds: ['NH6-SIL-AIZ'],
+    routeName: 'NH-6 Silchar–Aizawl',
+    state: 'Assam',
+    location: 'Barak River Bridge, Silchar',
+    startedAt: 'Yesterday · 22:10 IST',
+    status: 'clearing',
+    estimatedClearTimeHours: 336,
+    detourRequired: true,
+    detourDescription: 'Light vehicles only; heavy (>10t) via Lundgren–Aizawl hill road',
+    impactDelayMinutes: 60,
+    affectedVehicleIds: [],
+    impactCargoTypes: ['construction'],
+    outcome: 'escalated'
+  },
+  {
+    id: 'DISP-004',
+    cause: 'road_subsidence',
+    severity: 'critical',
+    roadSegmentIds: ['NH2-IMP-MOR'],
+    routeName: 'NH-2 Imphal–Moreh',
+    state: 'Manipur',
+    location: 'Kangpokpi section',
+    startedAt: 'Today · 03:30 IST',
+    status: 'active',
+    estimatedClearTimeHours: 120,
+    detourRequired: true,
+    detourDescription: 'Via Senapati–Mao hill circuit, expect +140 min',
+    impactDelayMinutes: 180,
+    affectedVehicleIds: ['NER-V004'],
+    impactCargoTypes: ['medicines', 'agricultural'],
+    outcome: 'reroute_failed'
+  },
+  {
+    id: 'DISP-005',
+    cause: 'landslide',
+    severity: 'critical',
+    roadSegmentIds: ['NH13-TWA-TEZ'],
+    routeName: 'NH-13 Tawang–Tezpur (Sela Pass)',
+    state: 'Arunachal Pradesh',
+    location: 'Sela Pass snow/slide zone',
+    startedAt: 'Today · 02:55 IST',
+    status: 'active',
+    estimatedClearTimeHours: 72,
+    detourRequired: true,
+    detourDescription: 'No practical diversion; hold cargo at Tezpur pre-positioning point',
+    impactDelayMinutes: 300,
+    affectedVehicleIds: ['NER-V008'],
+    impactCargoTypes: ['construction', 'general'],
+    outcome: 'unresolved'
+  },
+  {
+    id: 'DISP-006',
+    cause: 'weather',
+    severity: 'warning',
+    roadSegmentIds: ['NH10-SIL-GAN'],
+    routeName: 'NH-10 Siliguri–Gangtok (Teesta gorge)',
+    state: 'Sikkim',
+    location: 'Between Namchi and Gangtok',
+    startedAt: 'Today · 06:20 IST',
+    status: 'active',
+    estimatedClearTimeHours: 24,
+    detourRequired: false,
+    impactDelayMinutes: 50,
+    affectedVehicleIds: ['NER-V009'],
+    impactCargoTypes: ['medicines'],
+    outcome: 'reopened'
+  }
 ];
 
 // ---- Supply Chain Metrics ----
