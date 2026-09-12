@@ -15,9 +15,35 @@
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 
-const DATA_DIR = path.resolve(import.meta.dirname ?? process.cwd(), '../data');
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+function resolveDataDir(): string {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    const tmpDir = path.join(os.tmpdir(), 'pathly-data');
+    if (!fs.existsSync(tmpDir)) {
+      try { fs.mkdirSync(tmpDir, { recursive: true }); } catch {}
+    }
+    const bundledDb = path.resolve(import.meta.dirname ?? process.cwd(), '../data/gps.db');
+    const targetDb = path.join(tmpDir, 'gps.db');
+    if (!fs.existsSync(targetDb) && fs.existsSync(bundledDb)) {
+      try { fs.copyFileSync(bundledDb, targetDb); } catch {}
+    }
+    return tmpDir;
+  }
+  const localDir = path.resolve(import.meta.dirname ?? process.cwd(), '../data');
+  if (!fs.existsSync(localDir)) {
+    try {
+      fs.mkdirSync(localDir, { recursive: true });
+    } catch {
+      const tmpDir = path.join(os.tmpdir(), 'pathly-data');
+      if (!fs.existsSync(tmpDir)) try { fs.mkdirSync(tmpDir, { recursive: true }); } catch {}
+      return tmpDir;
+    }
+  }
+  return localDir;
+}
+
+const DATA_DIR = resolveDataDir();
 
 const DB_PATH = process.env['GPS_DB_PATH'] || path.join(DATA_DIR, 'gps.db');
 

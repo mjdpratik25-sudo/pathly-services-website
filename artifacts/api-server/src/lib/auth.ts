@@ -5,9 +5,38 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import os from 'node:os';
 import type { Request, Response, NextFunction } from 'express';
 
-const DATA_DIR = path.resolve(import.meta.dirname ?? process.cwd(), '../data');
+function resolveDataDir(): string {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    const tmpDir = path.join(os.tmpdir(), 'pathly-data');
+    if (!fs.existsSync(tmpDir)) {
+      try { fs.mkdirSync(tmpDir, { recursive: true }); } catch {}
+    }
+    for (const f of ['users.json', 'sessions.json', 'audit.log']) {
+      const bundled = path.resolve(import.meta.dirname ?? process.cwd(), `../data/${f}`);
+      const target = path.join(tmpDir, f);
+      if (!fs.existsSync(target) && fs.existsSync(bundled)) {
+        try { fs.copyFileSync(bundled, target); } catch {}
+      }
+    }
+    return tmpDir;
+  }
+  const localDir = path.resolve(import.meta.dirname ?? process.cwd(), '../data');
+  if (!fs.existsSync(localDir)) {
+    try {
+      fs.mkdirSync(localDir, { recursive: true });
+    } catch {
+      const tmpDir = path.join(os.tmpdir(), 'pathly-data');
+      if (!fs.existsSync(tmpDir)) try { fs.mkdirSync(tmpDir, { recursive: true }); } catch {}
+      return tmpDir;
+    }
+  }
+  return localDir;
+}
+
+const DATA_DIR = resolveDataDir();
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 const AUDIT_FILE = path.join(DATA_DIR, 'audit.log');
@@ -66,8 +95,10 @@ function readJson<T>(file: string, fallback: T): T {
 }
 
 function writeJson(file: string, data: unknown): void {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf-8');
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf-8');
+  } catch {}
 }
 
 // ---- Password hashing (scrypt — no external dependency) ----
