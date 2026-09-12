@@ -386,10 +386,24 @@ export function getRoadSegments(): RoadSegment[] {
 }
 
 export function getVehicles(): Vehicle[] {
-  if (!state.active) return VEHICLES;
+  if (!state.active && Object.keys(state.vehicleOverrides).length === 0) return VEHICLES;
   return VEHICLES.map((v) =>
     state.vehicleOverrides[v.id] ? { ...v, ...state.vehicleOverrides[v.id] } : v
   );
+}
+
+export function updateVehicleTrip(vehicleId: string, origin: string, destination: string, routeName?: string) {
+  patch({
+    vehicleOverrides: {
+      ...state.vehicleOverrides,
+      [vehicleId]: {
+        ...(state.vehicleOverrides[vehicleId] ?? {}),
+        origin,
+        destination,
+        ...(routeName ? { route: routeName } : {}),
+      },
+    },
+  });
 }
 
 export function applyScenarioWeather(base: WeatherData[]): WeatherData[] {

@@ -17,7 +17,9 @@ import {
   AlertTriangle,
   Smartphone,
   Check,
-  Crosshair
+  Crosshair,
+  Sparkles,
+  ExternalLink
 } from 'lucide-react';
 import { type Vehicle, getCargoIcon } from '../../data/nerData';
 import StatusBadge from '../common/StatusBadge';
@@ -25,6 +27,7 @@ import { dispatchDriverSms } from '../../lib/smsService';
 import { lockScroll, unlockScroll } from '../../lib/scrollLock';
 import { syncPlace, ensurePlace, type PlaceDescriptor } from '../../lib/placeNames';
 import { requireAuthAction } from '../../lib/authGate';
+import { getAssignedRouteForOrder } from '../../lib/orderRouteStore';
 
 interface CargoManifestProps {
   vehicle: Vehicle | null;
@@ -35,6 +38,7 @@ interface CargoManifestProps {
 export default function CargoManifest({ vehicle, onClose, onReroute }: CargoManifestProps) {
   const [smsSent, setSmsSent] = React.useState(false);
   const [nearPlace, setNearPlace] = React.useState<PlaceDescriptor | null>(null);
+  const assignedRoute = vehicle?.orderToken ? getAssignedRouteForOrder(vehicle.orderToken) : null;
 
   // Reverse-geocoded place name beside the GPS coordinates — matches the
   // map popup so both panels always show the same "Near:" location.
@@ -108,6 +112,74 @@ export default function CargoManifest({ vehicle, onClose, onReroute }: CargoMani
                   Transit speed reduced due to heavy rains/debris on {vehicle.route}. Estimated delay: +45 minutes.
                 </p>
               </div>
+            </div>
+          )}
+
+          {/* Assigned Optimal Route from Route Planner */}
+          {assignedRoute ? (
+            <div className="p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/30 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-blue-400">
+                  <Sparkles size={14} className="text-amber-400" />
+                  <span className="uppercase tracking-wider font-mono">Assigned Route Plan</span>
+                </div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-bold">
+                  {assignedRoute.status === 'assigned_fleet' ? 'FLEET ASSIGNED' : 'DISPATCHED'}
+                </span>
+              </div>
+              
+              <div className="space-y-0.5">
+                <h5 className="text-xs font-bold text-[hsl(var(--foreground))]">{assignedRoute.routeName}</h5>
+                <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
+                  Corridor: <span className="font-mono text-blue-300 font-semibold">{assignedRoute.corridorSummary}</span>
+                </p>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 pt-2 border-t border-blue-500/20 text-xs font-mono">
+                <div>
+                  <span className="text-[9px] text-[hsl(var(--muted-foreground))] block">PLANNED DIST</span>
+                  <span className="font-bold text-[hsl(var(--foreground))]">{assignedRoute.totalDistanceKm} km</span>
+                </div>
+                <div>
+                  <span className="text-[9px] text-[hsl(var(--muted-foreground))] block">EST TIME</span>
+                  <span className="font-bold text-blue-400">{assignedRoute.estimatedTimeHours} hrs</span>
+                </div>
+                <div>
+                  <span className="text-[9px] text-[hsl(var(--muted-foreground))] block">RISK SCORE</span>
+                  <span className={`font-bold ${assignedRoute.riskScore >= 70 ? 'text-red-400' : assignedRoute.riskScore >= 40 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    {assignedRoute.riskScore}/100
+                  </span>
+                </div>
+              </div>
+
+              {assignedRoute.avoidanceNotice && (
+                <div className="p-2 rounded bg-amber-500/10 border border-amber-500/30 text-[10px] text-amber-300 flex items-center gap-1.5 font-bold">
+                  <AlertTriangle size={12} className="shrink-0" />
+                  <span>{assignedRoute.avoidanceNotice}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-1 text-[10px] text-[hsl(var(--muted-foreground))]">
+                <span>Dispatched: {assignedRoute.dispatchedAt}</span>
+                <a 
+                  href={`/planner?order=${encodeURIComponent(vehicle.orderToken)}`}
+                  className="text-blue-400 hover:underline flex items-center gap-1 font-semibold"
+                >
+                  <span>Re-plan Route</span>
+                  <ExternalLink size={10} />
+                </a>
+              </div>
+            </div>
+          ) : (
+            <div className="p-2.5 rounded-lg bg-[hsl(var(--muted))]/30 border border-[hsl(var(--border))] flex items-center justify-between text-xs">
+              <span className="text-[11px] text-[hsl(var(--muted-foreground))]">Order: <strong className="font-mono text-blue-400">{vehicle.orderToken}</strong></span>
+              <a 
+                href={`/planner?order=${encodeURIComponent(vehicle.orderToken)}`}
+                className="text-xs text-blue-400 hover:underline flex items-center gap-1 font-bold"
+              >
+                <Sparkles size={12} />
+                <span>Plan Route for Order →</span>
+              </a>
             </div>
           )}
 

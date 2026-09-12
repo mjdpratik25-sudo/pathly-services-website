@@ -15,6 +15,16 @@ export default function AlertTicker({ alerts }: AlertTickerProps) {
   const [, setLocation] = useLocation();
   const activeAlerts = alerts.filter(a => a.isActive);
 
+  // Guarantee sufficient repetitions so the marquee never reveals an empty gap
+  const tickerItems = React.useMemo(() => {
+    if (activeAlerts.length === 0) return [];
+    let list = [...activeAlerts];
+    while (list.length < 10) {
+      list = list.concat(activeAlerts);
+    }
+    return list.concat(list);
+  }, [activeAlerts]);
+
   if (activeAlerts.length === 0) {
     return (
       <div className="border border-green-700 bg-green-50 px-3 sm:px-4 py-2 flex items-center justify-between gap-2 text-xs text-green-900 flex-wrap">
@@ -38,7 +48,7 @@ export default function AlertTicker({ alerts }: AlertTickerProps) {
       {/* Marquee Content */}
       <div className="flex-1 overflow-hidden whitespace-nowrap">
         <div className="inline-flex gap-8 animate-ticker">
-          {activeAlerts.concat(activeAlerts).map((alert, idx) => (
+          {tickerItems.map((alert, idx) => (
             <button
               key={`${alert.id}-${idx}`}
               type="button"

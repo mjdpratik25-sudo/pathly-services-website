@@ -22,16 +22,20 @@ import {
   Wifi,
   WifiOff,
   RotateCcw,
-  Gauge
+  Gauge,
+  Compass,
+  ShieldCheck,
+  Check,
 } from 'lucide-react';
 import DataProvenance from '../components/common/DataProvenance';
 import { useVehicleTracking } from '../hooks/useVehicleTracking';
 import { useAlerts } from '../hooks/useAlerts';
 import { transmitDriverMobilePing } from '../lib/api';
-import { getRoadSegments } from '../lib/scenarioEngine';
+import { getRoadSegments, updateVehicleTrip } from '../lib/scenarioEngine';
 import { findOptimalRoutes, type RouteOption } from '../lib/aiEngine';
 import { requireAuthAction } from '../lib/authGate';
 import { NER_DISTRICTS } from '../data/nerData';
+import { saveOrderRoute, getAssignedRouteForOrder } from '../lib/orderRouteStore';
 
 interface TurnStep {
   index: number;
@@ -40,6 +44,9 @@ interface TurnStep {
   instruction: string;
   landmark: string;
   status: 'done' | 'current' | 'next';
+  isBridge?: boolean;
+  bridgeName?: string;
+  weightLimitNote?: string;
 }
 
 function parseEtaMinutes(eta: string): number | null {
@@ -77,51 +84,312 @@ function isNightHaltWindow(d = new Date()): boolean {
   return h >= 22 || h < 5;
 }
 
+// ---- Detailed Multi-Waypoint Generator (PART 1) ----
+function generateDetailedTurnSteps(
+  origin: string,
+  dest: string,
+  route: RouteOption | null,
+  currentTurnIndex: number
+): TurnStep[] {
+  const normOrigin = (origin || '').trim();
+  const normDest = (dest || '').trim();
+
+  // 1. Guwahati -> Tezpur (Exact 7-Waypoint Route per PART 1 specifications)
+  if (
+    (normOrigin.toLowerCase() === 'guwahati' && normDest.toLowerCase() === 'tezpur') ||
+    (!route && normOrigin.toLowerCase() === 'guwahati')
+  ) {
+    const steps: Omit<TurnStep, 'status'>[] = [
+      {
+        index: 1,
+        roadName: 'NH-44 Guwahati–Jorabat',
+        distanceKm: 18,
+        instruction: 'Drive toward Jorabat via NH-44 Guwahati–Jorabat',
+        landmark: 'Jorabat Junction (Exiting Guwahati)',
+      },
+      {
+        index: 2,
+        roadName: 'NH-44 Jorabat–Jagi Road',
+        distanceKm: 34,
+        instruction: 'Continue via Jagi Road',
+        landmark: 'Jagi Road Industrial Corridor',
+      },
+      {
+        index: 3,
+        roadName: 'NH-44 Jagi Road–Raha',
+        distanceKm: 23,
+        instruction: 'Continue via Raha',
+        landmark: 'Raha Checkpoint',
+      },
+      {
+        index: 4,
+        roadName: 'NH-44 Raha–Nagaon',
+        distanceKm: 18,
+        instruction: 'Continue toward Nagaon',
+        landmark: 'Nagaon Bypass Junction',
+      },
+      {
+        index: 5,
+        roadName: 'NH-44 Nagaon–Koliabor Tiniali',
+        distanceKm: 45,
+        instruction: 'Continue via Koliabor Tiniali',
+        landmark: 'Koliabor Tiniali Junction',
+      },
+      {
+        index: 6,
+        roadName: 'Kaliabhomora Setu (NH-44 / NH-715)',
+        distanceKm: 6,
+        instruction: 'Cross Kaliabhomora Setu (Brahmaputra bridge crossing)',
+        landmark: 'Kaliabhomora Bridge · 40T Gross Limit',
+        isBridge: true,
+        bridgeName: 'Kaliabhomora Setu',
+        weightLimitNote: 'Brahmaputra Bridge Crossing · Passed Weight Inspection',
+      },
+      {
+        index: 7,
+        roadName: 'NH-44 Koliabor–Tezpur',
+        distanceKm: 34,
+        instruction: 'Arrive Tezpur via NH-44 Koliabor–Tezpur',
+        landmark: 'Tezpur Civil Hospital Hub',
+      },
+    ];
+
+    return steps.map((s, idx) => ({
+      ...s,
+      status: idx === currentTurnIndex ? 'current' : idx < currentTurnIndex ? 'done' : 'next',
+    }));
+  }
+
+  // 2. Imphal -> Moreh Corridor (Landslide Bypass Scenario)
+  if (normOrigin.toLowerCase() === 'imphal' && normDest.toLowerCase() === 'moreh') {
+    const steps: Omit<TurnStep, 'status'>[] = [
+      {
+        index: 1,
+        roadName: 'NH-2 Imphal South Exit',
+        distanceKm: 14,
+        instruction: 'Drive toward Thoubal via NH-2 Exit',
+        landmark: 'Thoubal District Junction',
+      },
+      {
+        index: 2,
+        roadName: 'MDR Kakching Bypass',
+        distanceKm: 28,
+        instruction: 'Divert via MDR Kakching Corridor (Bypassing NH-2 Landslide)',
+        landmark: 'Kakching Agricultural Terminal',
+      },
+      {
+        index: 3,
+        roadName: 'Pallel–Tengnoupal Hill Road',
+        distanceKm: 24,
+        instruction: 'Ascend Tengnoupal Mountain Pass',
+        landmark: 'Tengnoupal Ridge Checkpoint',
+      },
+      {
+        index: 4,
+        roadName: 'Lokchao River Bridge (NH-102)',
+        distanceKm: 8,
+        instruction: 'Cross Lokchao River Bridge (Heavy Axle Clearance)',
+        landmark: 'Lokchao Bridge Crossing · 35T Limit',
+        isBridge: true,
+        bridgeName: 'Lokchao Bridge',
+      },
+      {
+        index: 5,
+        roadName: 'NH-102 Moreh Approach',
+        distanceKm: 22,
+        instruction: 'Continue on NH-102 toward Border Gate',
+        landmark: 'Moreh Commercial Checkpoint',
+      },
+      {
+        index: 6,
+        roadName: 'Moreh Land Port Terminal',
+        distanceKm: 14,
+        instruction: 'Arrive Moreh Integrated Check Post',
+        landmark: 'Moreh ICP Border Depot',
+      },
+    ];
+    return steps.map((s, idx) => ({
+      ...s,
+      status: idx === currentTurnIndex ? 'current' : idx < currentTurnIndex ? 'done' : 'next',
+    }));
+  }
+
+  // 3. Shillong -> Jowai Corridor
+  if (normOrigin.toLowerCase() === 'shillong' && normDest.toLowerCase() === 'jowai') {
+    const steps: Omit<TurnStep, 'status'>[] = [
+      {
+        index: 1,
+        roadName: 'NH-6 Shillong Peak Pass',
+        distanceKm: 12,
+        instruction: 'Exit Shillong toward Mawryngkneng',
+        landmark: 'Mawryngkneng Bypass',
+      },
+      {
+        index: 2,
+        roadName: 'NH-6 East Khasi Foothills',
+        distanceKm: 16,
+        instruction: 'Continue on NH-6 through scenic plateau',
+        landmark: 'Mawlyngkhung Pass',
+      },
+      {
+        index: 3,
+        roadName: 'Umkhen River Bridge',
+        distanceKm: 5,
+        instruction: 'Cross Umkhen River Bridge',
+        landmark: 'Umkhen Bridge Crossing · 30T Rating',
+        isBridge: true,
+        bridgeName: 'Umkhen Bridge',
+      },
+      {
+        index: 4,
+        roadName: 'NH-6 Thadlaskein Stretch',
+        distanceKm: 18,
+        instruction: 'Continue toward Thadlaskein Lake Pass',
+        landmark: 'Thadlaskein Lake Pass',
+      },
+      {
+        index: 5,
+        roadName: 'NH-6 Jowai West Entry',
+        distanceKm: 13,
+        instruction: 'Arrive Jowai District Distribution Center',
+        landmark: 'Jowai Civil Depot',
+      },
+    ];
+    return steps.map((s, idx) => ({
+      ...s,
+      status: idx === currentTurnIndex ? 'current' : idx < currentTurnIndex ? 'done' : 'next',
+    }));
+  }
+
+  // 4. Dynamic Multi-Leg Subdivision for Any Custom Route
+  const totalDist = route?.totalDistance ?? 120;
+  const corridorName = route?.name ?? `${normOrigin}–${normDest} Corridor`;
+
+  const dist1 = Math.max(5, Math.round(totalDist * 0.15));
+  const dist2 = Math.max(8, Math.round(totalDist * 0.22));
+  const dist3 = Math.max(8, Math.round(totalDist * 0.20));
+  const dist4 = Math.max(4, Math.round(totalDist * 0.08)); // Bridge crossing landmark
+  const dist5 = Math.max(8, Math.round(totalDist * 0.20));
+  const dist6 = Math.max(5, totalDist - (dist1 + dist2 + dist3 + dist4 + dist5));
+
+  const steps: Omit<TurnStep, 'status'>[] = [
+    {
+      index: 1,
+      roadName: `${corridorName} (Exit Leg)`,
+      distanceKm: dist1,
+      instruction: `Depart ${normOrigin} via primary corridor`,
+      landmark: `${normOrigin} City Checkpost`,
+    },
+    {
+      index: 2,
+      roadName: `${corridorName} (Highway Stretch)`,
+      distanceKm: dist2,
+      instruction: `Continue along ${corridorName}`,
+      landmark: 'Intermediate Highway Junction',
+    },
+    {
+      index: 3,
+      roadName: `${corridorName} (Sub-District Link)`,
+      distanceKm: dist3,
+      instruction: 'Maintain corridor heading past regional interchange',
+      landmark: 'Regional Toll & Weigh Station',
+    },
+    {
+      index: 4,
+      roadName: `${corridorName} River Bridge`,
+      distanceKm: dist4,
+      instruction: 'Cross River Viaduct (Check Weight Limit)',
+      landmark: 'Major River Bridge Crossing · Regulated Axle Speed',
+      isBridge: true,
+      bridgeName: 'River Viaduct Bridge',
+    },
+    {
+      index: 5,
+      roadName: `${corridorName} (Approach Sector)`,
+      distanceKm: dist5,
+      instruction: `Continue toward ${normDest} entrance perimeter`,
+      landmark: `${normDest} Outer Sector`,
+    },
+    {
+      index: 6,
+      roadName: `${normDest} Logistics Link`,
+      distanceKm: dist6,
+      instruction: `Arrive ${normDest} Consignment Hub`,
+      landmark: `${normDest} Distribution Center`,
+    },
+  ];
+
+  return steps.map((s, idx) => ({
+    ...s,
+    status: idx === currentTurnIndex ? 'current' : idx < currentTurnIndex ? 'done' : 'next',
+  }));
+}
+
 export default function DriverMode() {
   const { vehicles, selectedVehicle, setSelectedVehicle, activeVehicles, gpsSyncStatus } = useVehicleTracking(3000);
   const { alerts } = useAlerts();
   const [vehicleId, setVehicleId] = useState<string>(activeVehicles[0]?.id ?? vehicles[0]?.id ?? 'NER-V001');
 
-  // active vehicle (explicitly selected)
+  // Active vehicle (explicitly selected)
   const vehicle = useMemo(
     () => vehicles.find((v) => v.id === vehicleId) ?? selectedVehicle ?? vehicles[0],
     [vehicles, vehicleId, selectedVehicle]
   );
 
-  // ---- Route computation ----
-  const route = useMemo<RouteOption | null>(() => {
-    if (!vehicle) return null;
-    const hubs = vehicleHubs(vehicle);
-    const opts = findOptimalRoutes(hubs.originHub, hubs.destHub, [], { cargoType: vehicle.cargoType, cargoWeight: vehicle.cargoWeight, priority: vehicle.priority });
-    return opts[0] ?? null;
-  }, [vehicle]);
-
-  // ---- Turn-by-turn steps derived from the network path ----
-  const turns = useMemo<TurnStep[]>(() => {
-    if (!route || !route.segments || route.segments.length === 0) {
-      // Fallback: derive from the vehicle's corridor label
-      const corridor = getRoadSegments().filter((s) => s.name.includes(vehicle?.route ?? 'NH'));
-      return corridor.map((seg, i) => ({
-        index: i + 1,
-        roadName: seg.name,
-        distanceKm: seg.distance,
-        instruction: i === 0 ? `Stay on ${seg.name} — ${seg.distance} km` : `Continue on ${seg.name}`,
-        landmark: seg.from === vehicle?.origin ? 'Start' : seg.to,
-        status: i === 0 ? ('current' as const) : ('next' as const),
-      }));
-    }
-    return route.segments.map((seg, i) => ({
-      index: i + 1,
-      roadName: seg.name,
-      distanceKm: seg.distance,
-      instruction: i === 0 ? `Drive toward ${seg.to} via ${seg.name}` : `Continue ${seg.distance} km on ${seg.name}`,
-      landmark: seg.to ?? `${i + 1}`,
-      status: i === 0 ? ('current' as const) : ('next' as const),
-    }));
-  }, [route, vehicle]);
-
   const [turnIndex, setTurnIndex] = useState(0);
   const [arrived, setArrived] = useState(false);
+
+  // Driver-configurable Departure and Destination (PART 2)
+  const [driverOrigin, setDriverOrigin] = useState<string>('Guwahati');
+  const [driverDestination, setDriverDestination] = useState<string>('Tezpur');
+  const [activeOrigin, setActiveOrigin] = useState<string>('Guwahati');
+  const [activeDestination, setActiveDestination] = useState<string>('Tezpur');
+  const [routeSyncNotice, setRouteSyncNotice] = useState<string | null>(null);
+  const [corridorWarning, setCorridorWarning] = useState<string | null>(null);
+
+  // Synchronize when vehicle selection changes
+  useEffect(() => {
+    if (vehicle) {
+      const assigned = vehicle.orderToken ? getAssignedRouteForOrder(vehicle.orderToken) : null;
+      const o = assigned?.origin || vehicle.origin || 'Guwahati';
+      const d = assigned?.destination || vehicle.destination || 'Tezpur';
+      setDriverOrigin(o);
+      setDriverDestination(d);
+      setActiveOrigin(o);
+      setActiveDestination(d);
+      setTurnIndex(0);
+      setArrived(false);
+      setCorridorWarning(null);
+      setRouteSyncNotice(null);
+    }
+  }, [vehicle?.id]);
+
+  // Distinct list of district hubs for driver autocomplete
+  const hubOptions = useMemo(() => {
+    const set = new Set<string>();
+    NER_DISTRICTS.forEach((d) => {
+      if (d.majorTown) set.add(d.majorTown);
+      if (d.name) set.add(d.name);
+    });
+    return Array.from(set).sort();
+  }, []);
+
+  // ---- Route computation based on activeOrigin and activeDestination ----
+  const route = useMemo<RouteOption | null>(() => {
+    const originHub = hubFor(activeOrigin);
+    const destHub = hubFor(activeDestination);
+    const opts = findOptimalRoutes(originHub, destHub, [], {
+      cargoType: vehicle?.cargoType ?? 'medicines',
+      cargoWeight: vehicle?.cargoWeight ?? 4.2,
+      priority: vehicle?.priority ?? 'normal',
+    });
+    return opts[0] ?? null;
+  }, [activeOrigin, activeDestination, vehicle]);
+
+  // ---- Turn-by-turn steps derived from the detailed generator (PART 1) ----
+  const turns = useMemo<TurnStep[]>(() => {
+    return generateDetailedTurnSteps(activeOrigin, activeDestination, route, turnIndex);
+  }, [activeOrigin, activeDestination, route, turnIndex]);
 
   // ---- Live ETA countdown ----
   const [remainingSec, setRemainingSec] = useState<number>(() => {
@@ -132,6 +400,120 @@ export default function DriverMode() {
     return route ? Math.round((route.costScore ?? 120) * 60) : 7200;
   });
   const [etaSource, setEtaSource] = useState<'network' | 'evolved'>('network');
+
+  // Handle Driver Route Update & Sync with Control Room (PART 2)
+  const handleUpdateDriverRoute = (newOrigin: string, newDestination: string) => {
+    if (!requireAuthAction('Update Trip Route')) return;
+    const cleanOrigin = newOrigin.trim();
+    const cleanDest = newDestination.trim();
+
+    if (!cleanOrigin || !cleanDest) {
+      setCorridorWarning('Please provide both Departure and Destination locations.');
+      return;
+    }
+    if (cleanOrigin.toLowerCase() === cleanDest.toLowerCase()) {
+      setCorridorWarning('Departure and Destination cannot be the same hub location.');
+      return;
+    }
+
+    // Corridor and cargo weight validation
+    if (cleanOrigin.toLowerCase().includes('imphal') && cleanDest.toLowerCase().includes('moreh')) {
+      setCorridorWarning('Active Landslide on NH-2: Direct route blocked. Automated bypass via MDR Kakching corridor calculated.');
+    } else if (vehicle && vehicle.cargoWeight > 7) {
+      setCorridorWarning(`Heavy Axle Protocol (${vehicle.cargoWeight}T): Regulated 20 km/h speed limit on river bridge landmarks.`);
+    } else {
+      setCorridorWarning(null);
+    }
+
+    setActiveOrigin(cleanOrigin);
+    setActiveDestination(cleanDest);
+    setTurnIndex(0);
+    setArrived(false);
+
+    const originHub = hubFor(cleanOrigin);
+    const destHub = hubFor(cleanDest);
+    const opts = findOptimalRoutes(originHub, destHub, [], {
+      cargoType: vehicle?.cargoType ?? 'medicines',
+      cargoWeight: vehicle?.cargoWeight ?? 4.2,
+      priority: vehicle?.priority ?? 'normal',
+    });
+    const bestRoute = opts[0] ?? null;
+
+    if (bestRoute) {
+      setRemainingSec(Math.round((bestRoute.costScore ?? 120) * 60));
+      setEtaSource('network');
+    }
+
+    // Sync back to Control Room
+    if (vehicle) {
+      // 1. Update vehicle trip in scenarioEngine so Tracking View and GIS Map reflect the new trip
+      updateVehicleTrip(vehicle.id, cleanOrigin, cleanDest, bestRoute?.name);
+
+      // 2. Persist in orderRouteStore so Cargo Manifest displays the updated assigned route
+      const orderToken = vehicle.orderToken || `ORD-${vehicle.id}`;
+      saveOrderRoute({
+        orderId: orderToken,
+        vehicleId: vehicle.id,
+        registrationNo: vehicle.registrationNo,
+        driverName: vehicle.driverName,
+        origin: cleanOrigin,
+        destination: cleanDest,
+        routeName: bestRoute ? `${cleanOrigin} → ${cleanDest} (${bestRoute.name})` : `${cleanOrigin} → ${cleanDest}`,
+        corridorSummary: bestRoute?.segments.map((s) => s.name).join(' → ') || 'Direct Corridor Link',
+        cargoType: vehicle.cargoType,
+        priority: vehicle.priority === 'emergency' ? 'emergency' : 'normal',
+        totalDistanceKm: bestRoute?.totalDistance ?? 178,
+        estimatedTimeHours: bestRoute?.estimatedTime ?? 3.5,
+        riskScore: bestRoute?.riskScore ?? 35,
+        riskClass: bestRoute?.riskAssessment.riskClass ?? 'LOW',
+        terrainDifficulty: bestRoute?.terrainDifficulty ?? 'moderate',
+        fuelEstimateLiters: Math.round((bestRoute?.totalDistance ?? 178) * 0.28),
+        tollCostRupees: 180,
+        dispatchedAt: new Date().toLocaleTimeString('en-IN') + ' · Driver Mode',
+        dispatchedBy: `Field Driver (${vehicle.driverName})`,
+        status: 'in_transit',
+        avoidanceNotice: (cleanOrigin.toLowerCase().includes('imphal') && cleanDest.toLowerCase().includes('moreh'))
+          ? 'Automated bypass via MDR Kakching corridor due to NH-2 landslide'
+          : undefined,
+      });
+
+      // 3. Transmit driver mobile ping
+      if (vehicle.currentLat && vehicle.currentLng) {
+        transmitDriverMobilePing({
+          vehicleId: vehicle.id,
+          latitude: vehicle.currentLat,
+          longitude: vehicle.currentLng,
+          speed: vehicle.speed || 40,
+          heading: vehicle.heading || 75,
+        });
+      }
+
+      // 4. Custom window event notification
+      window.dispatchEvent(
+        new CustomEvent('pathly_driver_route_updated', {
+          detail: {
+            vehicleId: vehicle.id,
+            origin: cleanOrigin,
+            destination: cleanDest,
+            orderToken,
+          },
+        })
+      );
+    }
+
+    const dist = bestRoute?.totalDistance ?? (cleanOrigin.toLowerCase() === 'guwahati' && cleanDest.toLowerCase() === 'tezpur' ? 178 : 120);
+    setRouteSyncNotice(`Trip Updated & Synced with Control Room: ${cleanOrigin} ➔ ${cleanDest} (${dist} km · Active)`);
+    setTimeout(() => setRouteSyncNotice(null), 8000);
+  };
+
+  const handleResetToAssigned = () => {
+    if (!vehicle) return;
+    const orig = vehicle.origin || 'Guwahati';
+    const dest = vehicle.destination || 'Tezpur';
+    setDriverOrigin(orig);
+    setDriverDestination(dest);
+    handleUpdateDriverRoute(orig, dest);
+  };
 
   useEffect(() => {
     if (arrived) return;
@@ -350,6 +732,113 @@ export default function DriverMode() {
         </div>
       </div>
 
+      {/* Trip Route Configuration & In-Cab Corridor Assignment (PART 2) */}
+      <div className="p-4 rounded-xl gov-panel border border-[#0B3D6D]/30 bg-slate-50/70 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
+          <div className="flex items-center gap-2">
+            <Compass size={16} className="text-[#0B3D6D]" />
+            <h3 className="text-sm font-bold text-slate-800">
+              Trip Route Configuration &amp; Corridor Assignment
+            </h3>
+            <span className="text-[10px] font-mono text-slate-600 bg-white border border-slate-200 px-1.5 py-0.5 rounded">
+              Driver Editable
+            </span>
+          </div>
+          <span className="text-[10px] font-mono text-[#0B3D6D]">
+            Vehicle: <strong>{vehicle?.registrationNo}</strong> ({vehicle?.orderToken || 'Ad-Hoc'})
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+          {/* Departure Field */}
+          <div className="sm:col-span-4 space-y-1">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 font-mono flex items-center gap-1">
+              <MapPin size={11} className="text-emerald-700" />
+              <span>Departure Point / Origin Hub</span>
+            </label>
+            <input
+              type="text"
+              list="driver-hub-options"
+              value={driverOrigin}
+              onChange={(e) => setDriverOrigin(e.target.value)}
+              placeholder="e.g. Guwahati"
+              className="w-full py-2 px-3 text-xs bg-white border border-slate-300 rounded font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#0B3D6D]/30 focus:border-[#0B3D6D] shadow-xs"
+            />
+          </div>
+
+          {/* Arrow indicator */}
+          <div className="hidden sm:flex sm:col-span-1 items-center justify-center pb-2 text-slate-400">
+            <ArrowRight size={16} />
+          </div>
+
+          {/* Destination Field */}
+          <div className="sm:col-span-4 space-y-1">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 font-mono flex items-center gap-1">
+              <MapPin size={11} className="text-red-700" />
+              <span>Destination District Hub</span>
+            </label>
+            <input
+              type="text"
+              list="driver-hub-options"
+              value={driverDestination}
+              onChange={(e) => setDriverDestination(e.target.value)}
+              placeholder="e.g. Tezpur"
+              className="w-full py-2 px-3 text-xs bg-white border border-slate-300 rounded font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#0B3D6D]/30 focus:border-[#0B3D6D] shadow-xs"
+            />
+          </div>
+
+          {/* Datalist of towns */}
+          <datalist id="driver-hub-options">
+            {hubOptions.map((town) => (
+              <option key={town} value={town} />
+            ))}
+          </datalist>
+
+          {/* Action Buttons */}
+          <div className="sm:col-span-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleUpdateDriverRoute(driverOrigin, driverDestination)}
+              disabled={isComputing}
+              className="flex-1 py-2 px-3 bg-[#0B3D6D] hover:bg-[#092D52] text-white text-xs font-bold rounded flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
+            >
+              <Navigation size={13} />
+              <span>{isComputing ? 'Calculating…' : 'Update Route'}</span>
+            </button>
+
+            {(driverOrigin !== vehicle?.origin || driverDestination !== vehicle?.destination) && (
+              <button
+                type="button"
+                onClick={handleResetToAssigned}
+                title="Reset to Control Room assigned origin/destination"
+                className="py-2 px-2.5 bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 text-xs font-semibold rounded transition-colors cursor-pointer"
+              >
+                <RotateCcw size={13} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Validation Warning Notice */}
+        {corridorWarning && (
+          <div className="p-2.5 rounded bg-amber-50 border border-amber-300 text-amber-900 text-[11px] font-mono flex items-start gap-2">
+            <AlertTriangle size={14} className="text-amber-700 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-bold">Corridor Validation Warning</p>
+              <p className="text-[10px] text-amber-800 mt-0.5">{corridorWarning}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Sync Feedback Notification */}
+        {routeSyncNotice && (
+          <div className="p-2 rounded bg-emerald-50 border border-emerald-300 text-emerald-800 text-[11px] font-mono flex items-center gap-1.5 animate-fade-in">
+            <CheckCircle2 size={13} className="text-emerald-700 shrink-0" />
+            <span>{routeSyncNotice}</span>
+          </div>
+        )}
+      </div>
+
       {/* Main grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Left: next maneuver + turn list */}
@@ -393,32 +882,65 @@ export default function DriverMode() {
           <div className="p-4 rounded-xl gov-panel">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-bold text-slate-700">Turn-by-Turn Guidance</h3>
-              <span className="text-[10px] font-mono text-slate-500">{turns.length} waypoints</span>
+              <span className="text-[10px] font-mono text-slate-500 font-bold bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                {turns.length} waypoints
+              </span>
             </div>
-            <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
               {turns.map((t) => (
                 <div
                   key={t.index}
-                  className={`flex items-center gap-3 p-2.5 rounded border ${
+                  className={`flex items-center gap-3 p-3 rounded border transition-all ${
                     t.status === 'current'
-                      ? 'border-[#FF9933] bg-[#FF9933]/10'
+                      ? 'border-[#FF9933] bg-[#FF9933]/10 ring-1 ring-[#FF9933]/40'
                       : t.status === 'done'
                         ? 'border-slate-200 bg-white text-slate-500'
-                        : 'border-slate-200 bg-white'
+                        : t.isBridge
+                          ? 'border-blue-300 bg-blue-50/40'
+                          : 'border-slate-200 bg-white'
                   }`}
                 >
-                  <span className={`w-7 h-7 rounded-full flex items-center justify-center font-mono text-[10px] font-bold ${
-                    t.status === 'done' ? 'bg-emerald-100 text-emerald-700' : 'bg-[#0B3D6D] text-white'
+                  <span className={`w-7 h-7 rounded-full flex items-center justify-center font-mono text-[10px] font-bold shrink-0 ${
+                    t.status === 'done'
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : t.isBridge
+                        ? 'bg-[#0B3D6D] text-amber-300 ring-2 ring-blue-300'
+                        : t.status === 'current'
+                          ? 'bg-[#FF9933] text-white'
+                          : 'bg-[#0B3D6D] text-white'
                   }`}>
-                    {t.status === 'done' ? <CheckCircle2 size={13} /> : t.index}
+                    {t.status === 'done' ? (
+                      <CheckCircle2 size={13} />
+                    ) : t.isBridge ? (
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 19h18" />
+                        <path d="M4 19V11a8 8 0 0 1 16 0v8" />
+                        <path d="M9 19v-5a3 3 0 0 1 6 0v5" />
+                        <path d="M3 11h18" />
+                      </svg>
+                    ) : (
+                      t.index
+                    )}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className={`text-xs font-bold truncate ${t.status === 'done' ? 'text-slate-400' : 'text-slate-800'}`}>
-                      {t.instruction}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className={`text-xs font-bold ${t.status === 'done' ? 'text-slate-400' : 'text-slate-800'}`}>
+                        {t.instruction}
+                      </p>
+                      {t.isBridge && (
+                        <span className="text-[9px] px-1.5 py-0.5 border border-blue-500/60 bg-blue-100/70 text-[#0B3D6D] font-mono font-bold uppercase rounded flex items-center gap-1">
+                          <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <path d="M3 19h18M4 19V11a8 8 0 0 1 16 0v8M9 19v-5a3 3 0 0 1 6 0v5" />
+                          </svg>
+                          Critical Bridge Landmark
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] font-mono text-slate-500 mt-0.5">
+                      {t.roadName} · <span className="font-semibold text-slate-700">{t.landmark}</span>
                     </p>
-                    <p className="text-[10px] font-mono text-slate-500">{t.roadName} · {t.landmark}</p>
                   </div>
-                  <span className="text-[11px] font-mono font-bold text-slate-600">{t.distanceKm} km</span>
+                  <span className="text-[11px] font-mono font-bold text-slate-700 shrink-0">{t.distanceKm} km</span>
                 </div>
               ))}
             </div>

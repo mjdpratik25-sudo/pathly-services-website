@@ -22,11 +22,24 @@ import {
   Check,
   User,
   MapPin,
+  CheckCircle2,
+  MessageSquare,
+  AlertTriangle,
 } from 'lucide-react';
 import { useLocation } from 'wouter';
 import { type OfficerProfile, DEFAULT_OFFICER } from '../auth/OfficerAuthModal';
 
 import { useUserLocation } from '../../hooks/useUserLocation';
+
+interface TestDispatchResult {
+  timestamp: string;
+  recipientName: string;
+  recipientPhone: string;
+  recipientVehicle: string;
+  messageContent: string;
+  creditsNote: string;
+  disclaimer: string;
+}
 
 interface OfficerProfileDrawerProps {
   isOpen: boolean;
@@ -45,7 +58,7 @@ export default function OfficerProfileDrawer({
 }: OfficerProfileDrawerProps) {
   const [, setLocation] = useLocation();
   const [smsSending, setSmsSending] = useState(false);
-  const [smsSentNotice, setSmsSentNotice] = useState<string | null>(null);
+  const [testDispatch, setTestDispatch] = useState<TestDispatchResult | null>(null);
   const location = useUserLocation();
 
   // Lock background scroll while the panel is open (shared with other overlays)
@@ -70,10 +83,18 @@ export default function OfficerProfileDrawer({
     setSmsSending(true);
     window.setTimeout(() => {
       setSmsSending(false);
-      setSmsSentNotice(
-        `SIMULATED DISPATCH — Fast2SMS provider not connected · Test message logged locally · ${new Date().toLocaleTimeString('en-IN')}`
-      );
-      window.setTimeout(() => setSmsSentNotice(null), 6000);
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const dateStr = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+      setTestDispatch({
+        timestamp: `${timeStr} IST · ${dateStr}`,
+        recipientName: 'Ranjan Das',
+        recipientPhone: '+91 9864011223',
+        recipientVehicle: 'AS-01-AB-1234 (Convoy Lead · NH-27/44)',
+        messageContent: 'Priority Alert: Route NH-44 reclassified HIGH RISK — reroute advised. Confirm receipt.',
+        creditsNote: '1 of 200 High-Priority SMS credits would be used',
+        disclaimer: 'Fast2SMS provider not connected · Test message logged locally · Simulation only',
+      });
     }, 700);
   };
 
@@ -240,10 +261,72 @@ export default function OfficerProfileDrawer({
                 <span>{smsSending ? 'Broadcasting SMS...' : 'Test Fast2SMS Priority Dispatch'}</span>
               </button>
             )}
-            {smsSentNotice && (
-              <p className="text-[11px] text-emerald-700 font-mono text-center animate-fade-in flex items-center justify-center gap-1">
-                <Check size={12} /> {smsSentNotice}
-              </p>
+            {testDispatch && (
+              <div className="rounded-lg border border-[#0B3D6D]/25 bg-slate-50 p-3.5 space-y-2.5 shadow-sm animate-fade-in relative text-left">
+                {/* Status Header */}
+                <div className="flex items-center justify-between gap-2 border-b border-[#d5dbe2] pb-2">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-[#0B3D6D]">
+                    <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
+                    <span>Test Dispatch Complete</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-amber-800 bg-amber-100 border border-amber-500 px-1.5 py-0.5 rounded">
+                      SIMULATED DISPATCH
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setTestDispatch(null)}
+                      className="text-slate-400 hover:text-slate-700 p-0.5 transition-colors cursor-pointer"
+                      title="Dismiss card"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Simulated Message Content */}
+                <div className="bg-white border border-[#d5dbe2] rounded p-2.5 space-y-1">
+                  <div className="text-[10px] uppercase font-bold text-slate-500 flex items-center gap-1 font-mono">
+                    <MessageSquare size={11} className="text-[#0B3D6D]" />
+                    <span>Dispatched Alert Message</span>
+                  </div>
+                  <p className="text-xs text-slate-800 font-mono leading-relaxed select-text bg-slate-50/70 p-2 rounded border border-slate-100">
+                    &ldquo;{testDispatch.messageContent}&rdquo;
+                  </p>
+                </div>
+
+                {/* Recipient & Consequential Info */}
+                <div className="space-y-1.5 text-[11px]">
+                  <div className="flex items-center justify-between text-slate-600">
+                    <span className="text-slate-500 font-medium">Recipient:</span>
+                    <span className="font-semibold text-slate-900 text-right">
+                      {testDispatch.recipientName} <span className="font-mono text-[#0B3D6D]">· {testDispatch.recipientPhone}</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-600">
+                    <span className="text-slate-500 font-medium">Assigned Asset:</span>
+                    <span className="font-mono text-slate-700 text-[10px] text-right">
+                      {testDispatch.recipientVehicle}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-600 pt-1 border-t border-[#d5dbe2]/70">
+                    <span className="text-slate-500 font-medium">Credit Preview:</span>
+                    <span className="font-mono font-semibold text-slate-800 text-[10px]">
+                      {testDispatch.creditsNote}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-500 text-[10px] font-mono pt-0.5">
+                    <span>Dispatch Time:</span>
+                    <span>{testDispatch.timestamp}</span>
+                  </div>
+                </div>
+
+                {/* Honest Simulation Disclaimer */}
+                <div className="flex items-start gap-1.5 text-[10px] text-amber-900 bg-amber-50/90 border border-amber-300/80 rounded px-2 py-1.5 font-mono">
+                  <AlertTriangle size={12} className="text-amber-700 shrink-0 mt-0.5" />
+                  <span className="leading-tight">{testDispatch.disclaimer}</span>
+                </div>
+              </div>
             )}
 
             <button

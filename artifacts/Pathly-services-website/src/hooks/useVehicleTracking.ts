@@ -140,7 +140,10 @@ export function useVehicleTracking(updateIntervalMs = 5000) {
     return vehicles.filter(v => v.cargoType === cargoType);
   }, [vehicles]);
 
-  const activeVehicles = vehicles.filter(v => v.status === 'in_transit' || v.status === 'delayed');
+  const movingOrDelayed = vehicles.filter(v => v.status === 'in_transit' || v.status === 'delayed');
+  const activeVehicles = movingOrDelayed.length > 0
+    ? movingOrDelayed
+    : vehicles.filter(v => v.status !== 'delivered');
   const delayedVehicles = vehicles.filter(v => v.status === 'delayed');
   const emergencyVehicles = vehicles.filter(v => v.priority === 'emergency');
 
