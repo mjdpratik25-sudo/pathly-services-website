@@ -1,7 +1,0 @@
-.git
-.agents
-.conversation
-.local
-.cache
-node_modules
-**/node_modules
