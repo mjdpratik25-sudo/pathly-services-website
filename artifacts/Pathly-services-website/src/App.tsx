@@ -220,7 +220,10 @@ export default function App() {
   const [location, setLocation] = useLocation();
   const { t } = useTranslation();
 
-  // Reset to Home page ('/'), log out, and return to Control Mode on page refresh or fresh browser entry
+  // When refreshing the website:
+  // 1. Take the user to the Control Room Home page ('/') with the default Control UI
+  // 2. If Driver Mode was chosen previously, reset it to Control Mode ('control_room')
+  // 3. Keep the user logged in ("Dear User") until and unless they manually log out!
   useEffect(() => {
     try {
       const navEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
@@ -230,24 +233,24 @@ export default function App() {
       if (isReload || !hasSession) {
         sessionStorage.setItem('pathly_session_active', '1');
 
-        // Always clean any lingering localStorage auth/role
-        localStorage.removeItem('pathly_officer_session');
-        localStorage.removeItem('pathly_role');
-
         if (isReload) {
-          sessionStorage.removeItem('pathly_officer_session');
+          // Reset role back to Control Room mode (never stay in Driver Mode after refresh)
+          localStorage.removeItem('pathly_role');
           sessionStorage.removeItem('pathly_role');
           window.dispatchEvent(new Event('pathly_role_changed'));
-          window.dispatchEvent(new Event('pathly_officer_session_changed'));
-        }
 
-        // If on reload, or if opened directly on Driver Mode on a fresh session:
-        // take the user to the Home page ('/') in Control Mode
-        if (isReload || window.location.pathname === '/driver-mode') {
+          // Always return to the Control Room Home page ('/') on refresh
           if (window.location.pathname !== '/') {
             window.history.replaceState(null, '', '/');
             setLocation('/');
           }
+        } else if (window.location.pathname === '/driver-mode') {
+          // If opened fresh directly on Driver Mode, reset to Control Room Home
+          localStorage.removeItem('pathly_role');
+          sessionStorage.removeItem('pathly_role');
+          window.dispatchEvent(new Event('pathly_role_changed'));
+          window.history.replaceState(null, '', '/');
+          setLocation('/');
         }
       }
     } catch {}
@@ -258,8 +261,6 @@ export default function App() {
           const navEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
           const isReload = navEntry?.type === 'reload' || (typeof performance !== 'undefined' && (performance as any).navigation?.type === 1);
           if (isReload) {
-            localStorage.removeItem('pathly_officer_session');
-            sessionStorage.removeItem('pathly_officer_session');
             localStorage.removeItem('pathly_role');
             sessionStorage.removeItem('pathly_role');
             if (window.location.pathname !== '/') {
@@ -267,7 +268,6 @@ export default function App() {
               setLocation('/');
             }
             window.dispatchEvent(new Event('pathly_role_changed'));
-            window.dispatchEvent(new Event('pathly_officer_session_changed'));
           }
         } catch {}
       }

@@ -84,7 +84,7 @@ export default function Login({ isDark }: LoginProps) {
 
   const finishAuth = (profile: OfficerProfile) => {
     try {
-      localStorage.removeItem('pathly_officer_session');
+      localStorage.setItem('pathly_officer_session', JSON.stringify(profile));
       sessionStorage.setItem('pathly_officer_session', JSON.stringify(profile));
       window.dispatchEvent(new Event('pathly_officer_session_changed'));
     } catch {}

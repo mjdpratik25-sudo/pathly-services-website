@@ -17,14 +17,8 @@ export const REQUIRE_LOGIN_EVENT = 'pathly_require_login';
 
 export function isAuthenticated(): boolean {
   try {
-    localStorage.removeItem('pathly_officer_session');
-    const navEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
-    const isReload = navEntry?.type === 'reload' || (typeof performance !== 'undefined' && (performance as any).navigation?.type === 1);
-    if (isReload) {
-      sessionStorage.removeItem('pathly_officer_session');
-      return false;
-    }
-    return !!sessionStorage.getItem('pathly_officer_session');
+    const raw = localStorage.getItem('pathly_officer_session') || sessionStorage.getItem('pathly_officer_session');
+    return !!raw;
   } catch {
     return false;
   }

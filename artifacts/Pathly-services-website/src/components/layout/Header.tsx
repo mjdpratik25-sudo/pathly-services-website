@@ -113,14 +113,7 @@ export default function Header({
 
   const [officer, setOfficer] = useState<OfficerProfile | null>(() => {
     try {
-      localStorage.removeItem('pathly_officer_session');
-      const navEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
-      const isReload = navEntry?.type === 'reload' || (typeof performance !== 'undefined' && (performance as any).navigation?.type === 1);
-      if (isReload) {
-        sessionStorage.removeItem('pathly_officer_session');
-        return null;
-      }
-      const saved = sessionStorage.getItem('pathly_officer_session');
+      const saved = localStorage.getItem('pathly_officer_session') || sessionStorage.getItem('pathly_officer_session');
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
@@ -130,7 +123,7 @@ export default function Header({
   useEffect(() => {
     const handleSync = () => {
       try {
-        const saved = sessionStorage.getItem('pathly_officer_session');
+        const saved = localStorage.getItem('pathly_officer_session') || sessionStorage.getItem('pathly_officer_session');
         setOfficer(saved ? JSON.parse(saved) : null);
       } catch {
         setOfficer(null);
