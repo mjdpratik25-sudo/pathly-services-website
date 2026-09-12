@@ -217,8 +217,64 @@ export default function App() {
 
   const { activeAlerts } = useAlerts();
   const { isOnline, setIsOnline } = useOfflineSync();
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const { t } = useTranslation();
+
+  // Reset to Home page ('/'), log out, and return to Control Mode on page refresh or fresh browser entry
+  useEffect(() => {
+    try {
+      const navEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+      const isReload = navEntry?.type === 'reload' || (typeof performance !== 'undefined' && (performance as any).navigation?.type === 1);
+      const hasSession = sessionStorage.getItem('pathly_session_active');
+
+      if (isReload || !hasSession) {
+        sessionStorage.setItem('pathly_session_active', '1');
+
+        // Always clean any lingering localStorage auth/role
+        localStorage.removeItem('pathly_officer_session');
+        localStorage.removeItem('pathly_role');
+
+        if (isReload) {
+          sessionStorage.removeItem('pathly_officer_session');
+          sessionStorage.removeItem('pathly_role');
+          window.dispatchEvent(new Event('pathly_role_changed'));
+          window.dispatchEvent(new Event('pathly_officer_session_changed'));
+        }
+
+        // If on reload, or if opened directly on Driver Mode on a fresh session:
+        // take the user to the Home page ('/') in Control Mode
+        if (isReload || window.location.pathname === '/driver-mode') {
+          if (window.location.pathname !== '/') {
+            window.history.replaceState(null, '', '/');
+            setLocation('/');
+          }
+        }
+      }
+    } catch {}
+
+    const handlePageShow = (e: Event) => {
+      if ((e as any).persisted) {
+        try {
+          const navEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+          const isReload = navEntry?.type === 'reload' || (typeof performance !== 'undefined' && (performance as any).navigation?.type === 1);
+          if (isReload) {
+            localStorage.removeItem('pathly_officer_session');
+            sessionStorage.removeItem('pathly_officer_session');
+            localStorage.removeItem('pathly_role');
+            sessionStorage.removeItem('pathly_role');
+            if (window.location.pathname !== '/') {
+              window.history.replaceState(null, '', '/');
+              setLocation('/');
+            }
+            window.dispatchEvent(new Event('pathly_role_changed'));
+            window.dispatchEvent(new Event('pathly_officer_session_changed'));
+          }
+        } catch {}
+      }
+    };
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
+  }, [setLocation]);
 
   // Apply light/dark class on html element so the entire app (incl. modals)
   // switches together. Persist the choice.

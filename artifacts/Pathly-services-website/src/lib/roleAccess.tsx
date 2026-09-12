@@ -49,7 +49,14 @@ const STORAGE_KEY = 'pathly_role';
 
 function readStoredRole(): RoleKey {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    localStorage.removeItem(STORAGE_KEY);
+    const navEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+    const isReload = navEntry?.type === 'reload' || (typeof performance !== 'undefined' && (performance as any).navigation?.type === 1);
+    if (isReload) {
+      sessionStorage.removeItem(STORAGE_KEY);
+      return 'control_room';
+    }
+    const stored = sessionStorage.getItem(STORAGE_KEY);
     if (stored && ROLES.some((r) => r.key === stored)) return stored as RoleKey;
   } catch { /* ignore */ }
   return 'control_room';
@@ -71,7 +78,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
   const setRole = (next: RoleKey) => {
     setRoleState(next);
     try {
-      localStorage.setItem(STORAGE_KEY, next);
+      sessionStorage.setItem(STORAGE_KEY, next);
     } catch { /* ignore */ }
   };
 

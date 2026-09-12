@@ -113,12 +113,32 @@ export default function Header({
 
   const [officer, setOfficer] = useState<OfficerProfile | null>(() => {
     try {
-      const saved = localStorage.getItem('pathly_officer_session');
+      localStorage.removeItem('pathly_officer_session');
+      const navEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+      const isReload = navEntry?.type === 'reload' || (typeof performance !== 'undefined' && (performance as any).navigation?.type === 1);
+      if (isReload) {
+        sessionStorage.removeItem('pathly_officer_session');
+        return null;
+      }
+      const saved = sessionStorage.getItem('pathly_officer_session');
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
     }
   });
+
+  useEffect(() => {
+    const handleSync = () => {
+      try {
+        const saved = sessionStorage.getItem('pathly_officer_session');
+        setOfficer(saved ? JSON.parse(saved) : null);
+      } catch {
+        setOfficer(null);
+      }
+    };
+    window.addEventListener('pathly_officer_session_changed', handleSync);
+    return () => window.removeEventListener('pathly_officer_session_changed', handleSync);
+  }, []);
 
   const isLoggedIn = !!officer;
 
@@ -214,12 +234,17 @@ export default function Header({
     try {
       localStorage.removeItem('pathly_officer_session');
       localStorage.removeItem('pathly_role');
+      sessionStorage.removeItem('pathly_officer_session');
+      sessionStorage.removeItem('pathly_role');
     } catch {}
     try {
       sessionStorage.clear();
     } catch {}
     setOfficer(null);
     setIsProfileOpen(false);
+    try {
+      setRole('control_room');
+    } catch {}
 
     // Full page reload → guarantees NO stale React/app state survives after
     // sign-out (the earlier bug where a new session showed the previous

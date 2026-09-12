@@ -15,10 +15,10 @@
     "timestamp": "5 hours ago",
     "status": "submitted",
     "syncStatus": "synced",
-    "serverSyncedAt": "2026-09-12T03:54:32.722Z",
-    "updatedAt": "2026-09-12T03:54:32.705Z",
-    "lastAttemptAt": "2026-09-12T03:54:32.705Z",
-    "attempts": 1
+    "updatedAt": "2026-09-12T15:12:46.455Z",
+    "lastAttemptAt": "2026-09-12T15:12:46.455Z",
+    "attempts": 2,
+    "serverSyncedAt": "2026-09-12T15:12:46.496Z"
   },
   {
     "officerName": "Anurag Bora",

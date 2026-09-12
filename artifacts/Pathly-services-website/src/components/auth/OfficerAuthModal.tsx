@@ -155,7 +155,8 @@ export default function OfficerAuthModal({
     }
 
     try {
-      localStorage.setItem('pathly_officer_session', JSON.stringify(profile));
+      localStorage.removeItem('pathly_officer_session');
+      sessionStorage.setItem('pathly_officer_session', JSON.stringify(profile));
     } catch {}
     setSuccessMessage(`Welcome, ${profile.name}! Logging you in as ${profile.role}...`);
     setAuthSuccess(true);
@@ -227,7 +228,9 @@ export default function OfficerAuthModal({
     };
 
     try {
-      localStorage.setItem('pathly_officer_session', JSON.stringify(profile));
+      localStorage.removeItem('pathly_officer_session');
+      sessionStorage.setItem('pathly_officer_session', JSON.stringify(profile));
+      window.dispatchEvent(new Event('pathly_officer_session_changed'));
     } catch {}
     setSuccessMessage(`OTP Verified! Welcome, ${profile.name}!`);
     setAuthSuccess(true);
@@ -255,7 +258,9 @@ export default function OfficerAuthModal({
     };
 
     try {
-      localStorage.setItem('pathly_officer_session', JSON.stringify(profile));
+      localStorage.removeItem('pathly_officer_session');
+      sessionStorage.setItem('pathly_officer_session', JSON.stringify(profile));
+      window.dispatchEvent(new Event('pathly_officer_session_changed'));
     } catch {}
     setSuccessMessage(`Welcome, ${profile.name}! Successfully signed in as ${profile.role}.`);
     setAuthSuccess(true);
